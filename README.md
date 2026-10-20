@@ -29,13 +29,15 @@ Use `$protein-eval-graph` in Codex after installation. Example request:
 
 | Type | Description | Tool |
 |---|---|---|
-| DAA composition bars | For each input, compare D-residue count and D-residue fraction across its D-containing protein chains. | `plot_daa.py` |
-| Folding and docking comparison bars | For one input ID, compare model predictions across four folding and four docking metrics. | `plot_metrics.py compare` |
-| Seed-selection comparison bars | Compare confidence top-1 and oracle selections across models using median/mean bars, optionally with sample-SD error bars. | `plot_metrics.py selection-bars` |
-| Chirality versus structure scatter | Plot structure metrics against pooled D/L chirality accuracy using all seeds, top-1, or metric-specific oracle. Two methods can be paired with dotted lines. | `plot_metrics.py scatter` |
-| Seed min–max ranges | Show each seed score and the observed min–max range for each input and method, one graph per metric. | `plot_metrics.py seed-range` |
-| Metric distributions | Compare a many-seed unsteered violin/box/points with a few individual steering points for one input. | `plot_metrics.py distribution` |
-| Ramachandran overlay | Compare native and predicted chain backbone φ/ψ angles; export single plots, an overlay, and residue-level CSVs. | `ramachandran_compare.py` |
+| DAA composition bars | For each input, compare D-residue count and D-residue fraction across its D-containing protein chains. | [plot_daa.py](scripts/plot_daa.py) |
+| Folding and docking comparison bars | For one input ID, compare model predictions across four folding and four docking metrics. | [plot_metrics.py](scripts/plot_metrics.py) `compare` |
+| Seed-selection comparison bars | Compare confidence top-1 and oracle selections across models using median/mean bars, optionally with sample-SD error bars. | [plot_metrics.py](scripts/plot_metrics.py) `selection-bars` |
+| Chirality versus structure scatter | Plot structure metrics against pooled D/L chirality accuracy using all seeds, top-1, or metric-specific oracle. Two methods can be paired with dotted lines. | [plot_metrics.py](scripts/plot_metrics.py) `scatter` |
+| Seed min–max ranges | Show each seed score and the observed min–max range for each input and method, one graph per metric. | [plot_metrics.py](scripts/plot_metrics.py) `seed-range` |
+| Metric distributions | Compare a many-seed unsteered violin/box/points with a few individual steering points for one input. | [plot_metrics.py](scripts/plot_metrics.py) `distribution` |
+| Ramachandran overlay | Compare native and predicted chain backbone φ/ψ angles; export single plots, an overlay, and residue-level CSVs. | [ramachandran_compare.py](scripts/ramachandran_compare.py) |
+
+All three tool scripts are in the repository's [scripts directory](scripts/). `plot_metrics.py` handles five graph types through the subcommands shown above.
 
 The exact metric labels are **Target self-aligned backbone RMSD**, **Binder self-aligned backbone RMSD**, **Global all-atom lDDT**, **Chirality accuracy**, **Interface lDDT**, **DockQ**, and **Target-aligned binder backbone RMSD**. The older eight-panel comparison also contains **Interface RMSD**, so the tool includes it as the eighth metric when data are available. Every metric panel states `(↑ better)` or `(↓ better)`. Blue denotes non-steering and orange denotes steering; use `--steering MODEL` when the label alone does not identify steering. RMSDs use Å, chirality uses %, and lDDT/DockQ use 0–1 scores.
 
