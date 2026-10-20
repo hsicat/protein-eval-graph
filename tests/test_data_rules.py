@@ -54,6 +54,8 @@ class DataRuleTests(unittest.TestCase):
             self.assertEqual(choose(points, "top1", "lddt")["seed"], "00")
             self.assertEqual(choose(points, "oracle", "lddt")["seed"], "01")
             self.assertEqual(choose(points, "oracle", "binder")["seed"], "00")
+            tied = [{**points[0], "chirality": 100}, {**points[1], "chirality": 100}]
+            self.assertEqual(choose(tied, "oracle", "chirality")["seed"], "01")
 
     def test_daa_count_expands_physical_chains_and_excludes_other_chains(self):
         with tempfile.TemporaryDirectory() as tmp:

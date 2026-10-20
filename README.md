@@ -7,7 +7,7 @@ A reusable Codex skill and command-line plotting tools for protein prediction ev
 Install the Codex skill from this standalone repository:
 
 ```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo hsicat/protein-eval-graph --path . --name protein-eval-graph
 ```
 

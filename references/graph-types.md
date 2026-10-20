@@ -13,6 +13,7 @@ Use `plot_metrics.py compare --input-id ID` with one or more model sources. Eigh
 ## Seed-selection bars
 
 Use `selection-bars` for top-1 versus metric-specific oracle. Top-1 requires a `confidence_score` column, `--confidence-csv`, or adjacent Boltz confidence JSON files via `--confidence-root`. `--scope common` retains IDs with both methods; `--scope all` uses available IDs per method. RMSDs are medians across selected inputs; lDDT, iLDDT, and DockQ are arithmetic means; chirality is pooled over assessable residues when counts are present. `--error-bars` shows sample SD of selected input-level values, **not** uncertainty of the aggregate. `--oracle-target chirality` reproduces the older single-chirality-oracle selection on every panel.
+Oracle ties prefer higher chirality accuracy, then lower target-aligned binder backbone RMSD, then the lowest seed ID.
 
 ## Chirality-versus-structure scatter
 

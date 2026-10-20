@@ -230,7 +230,12 @@ def choose(candidates: list[dict], mode: str, metric: str) -> dict:
     if mode == "oracle":
         m = BY_KEY[metric]
         finite = require_values(candidates, metric)
-        return min(finite, key=lambda p: ((-p[metric] if m.higher else p[metric]), -p["chirality"] if p["chirality"] is not None else 0, p["seed"], p["prediction_path"]))
+        return min(finite, key=lambda p: (
+            -p[metric] if m.higher else p[metric],
+            -p["chirality"] if p["chirality"] is not None else 0,
+            p["placed"] if p["placed"] is not None else float("inf"),
+            p["seed"], p["prediction_path"],
+        ))
     raise ValueError(f"Unknown selection {mode}")
 
 
@@ -437,9 +442,13 @@ def scatter(args, predictions, keys):
                 ax.text(0.98, 0.98 - models.index(model) * 0.07, f"{model}: r={r:.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=8)
         if len(models) == 2:
             pair_keys = (lambda p: (p["sample_id"], p["seed"])) if args.selection == "all" else (lambda p: (p["sample_id"],))
-            sides = [{pair_keys(p): p for p in selected if p["model"] == model} for model in models]
+            sides = [defaultdict(list) for _ in models]
+            for p in selected:
+                sides[models.index(p["model"])][pair_keys(p)].append(p)
             for pair_id in sorted(sides[0].keys() & sides[1].keys()):
-                a, b = sides[0][pair_id], sides[1][pair_id]
+                if len(sides[0][pair_id]) != 1 or len(sides[1][pair_id]) != 1:
+                    raise ValueError(f"Ambiguous paired predictions for {pair_id}; choose one structure per input and seed")
+                a, b = sides[0][pair_id][0], sides[1][pair_id][0]
                 ax.plot([a["chirality"], b["chirality"]], [a[key], b[key]], linestyle=":", color="#64748B", alpha=0.47, zorder=2)
                 pair_rows.append({"metric": key, "sample_id": a["sample_id"], "seed_1": a["seed"], "seed_2": b["seed"], "model_1": models[0], "model_2": models[1], "value_1": a[key], "value_2": b[key]})
         for p in selected:
@@ -478,6 +487,8 @@ def seed_range(args, predictions, keys):
                 points = [p for p in grouped.get((model, sample_id), []) if p[key] is not None]
                 if not points:
                     continue
+                if len({p["seed"] for p in points}) != len(points):
+                    raise ValueError(f"Multiple predictions for a seed of {sample_id} {model}; select one structure per seed")
                 y = i + (-0.16 if j == 0 else 0.16)
                 values = [p[key] for p in points]
                 color = method_color(model, set(args.steering))
