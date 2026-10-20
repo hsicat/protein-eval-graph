@@ -1,0 +1,3 @@
+interface:
+  display_name: "Protein Eval Graph"
+  short_description: "Plot protein evaluation metrics and backbone torsions"
