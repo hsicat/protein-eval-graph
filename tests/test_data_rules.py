@@ -13,10 +13,45 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from plot_daa import extract  # noqa: E402
-from plot_metrics import choose, load_predictions  # noqa: E402
+from plot_metrics import BY_KEY, choose, load_predictions, panels, parse_formats, selection_axis_label  # noqa: E402
+from plot_daa_groups import prepare, read_groups  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
 
 
 class DataRuleTests(unittest.TestCase):
+    def test_metric_rows_and_requested_formats(self):
+        fig, axes = panels(["dockq", "target", "placed", "lddt"], "Metric layout")
+        try:
+            self.assertEqual(axes["target"].get_subplotspec().rowspan.start, 0)
+            self.assertEqual(axes["lddt"].get_subplotspec().rowspan.start, 0)
+            self.assertEqual(axes["dockq"].get_subplotspec().rowspan.start, 1)
+            self.assertEqual(axes["placed"].get_subplotspec().rowspan.start, 1)
+            self.assertEqual(parse_formats("svg,png,pdf"), ("svg", "png", "pdf"))
+            self.assertEqual(selection_axis_label(BY_KEY["target"]), "Median (Å)")
+            self.assertEqual(selection_axis_label(BY_KEY["chirality"]), "Residue-pooled accuracy (%)")
+        finally:
+            plt.close(fig)
+
+    def test_daa_groups_oracle_and_legacy_chain_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chain_details.csv"
+            path.write_text("sample,length,d_residues\nA,8,1\nB,8,8\nC,8,3\n", encoding="utf-8")
+            groups = read_groups(path)
+            self.assertEqual([groups[s]["group"] for s in "ABC"], ["Single D", "All D", "Partial D"])
+            points = []
+            for model in ("baseline", "steering"):
+                for sample in "ABC":
+                    for seed, rmsd, lddt in (("1", 4, .9), ("2", 2, .7)):
+                        points.append({"model": model, "sample_id": sample, "seed": seed,
+                                       "prediction_path": f"{model}/{sample}/{seed}", "chirality": 100,
+                                       "target": rmsd, "lddt": lddt, "placed": 1})
+            excluded, seeds, inputs, summary = prepare(points, groups, ["baseline", "steering"], ["target", "lddt"], 2)
+            self.assertFalse(excluded)
+            self.assertEqual(len(seeds), 24)
+            self.assertEqual(next(r["oracle_seed"] for r in inputs if r["metric"] == "target"), "2")
+            self.assertEqual(next(r["oracle_seed"] for r in inputs if r["metric"] == "lddt"), "1")
+            self.assertEqual(next(r["group_oracle_value"] for r in summary if r["group"] == "All D" and r["metric"] == "target"), 2)
+
     def test_binder_groups_are_one_prediction_and_oracles_are_metric_specific(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "batch_summary.csv"

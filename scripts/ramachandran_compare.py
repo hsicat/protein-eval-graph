@@ -38,6 +38,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from Bio.PDB import MMCIFParser, PDBParser
+from plot_metrics import parse_formats
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +298,7 @@ def sanitize_filename(text: str) -> str:
     return text.strip("_") or "structure"
 
 
-def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False):
+def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False, formats: tuple[str, ...] = ("svg",)):
     valid = df.dropna(subset=["phi_deg", "psi_deg"])
 
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -325,8 +326,8 @@ def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False):
             )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=220, bbox_inches="tight")
-    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    for fmt in formats:
+        fig.savefig(out_path.with_suffix(f".{fmt}"), dpi=220, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -334,6 +335,7 @@ def plot_overlay(
     datasets: List[pd.DataFrame],
     out_path: Path,
     annotate_native: bool = False,
+    formats: tuple[str, ...] = ("svg",),
 ):
     fig, ax = plt.subplots(figsize=(8, 8))
     setup_ramachandran_axes(ax, "Native vs predictions — Ramachandran overlay")
@@ -372,8 +374,8 @@ def plot_overlay(
 
     ax.legend(frameon=True, fontsize=9)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=220, bbox_inches="tight")
-    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
+    for fmt in formats:
+        fig.savefig(out_path.with_suffix(f".{fmt}"), dpi=220, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -512,6 +514,7 @@ def parse_args():
         default=Path("ramachandran_output"),
         help="Output directory (default: ramachandran_output)",
     )
+    parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated output formats: svg,png,pdf (default: svg)")
 
     parser.add_argument(
         "--annotate",
@@ -561,10 +564,10 @@ def main():
         safe = sanitize_filename(label)
 
         csv_path = args.outdir / f"{safe}_phi_psi.csv"
-        plot_path = args.outdir / f"{safe}_ramachandran.png"
+        plot_path = args.outdir / f"{safe}_ramachandran"
 
         df.to_csv(csv_path, index=False)
-        plot_single(df, plot_path, annotate=args.annotate)
+        plot_single(df, plot_path, annotate=args.annotate, formats=args.formats)
 
     # Combined long-form CSV
     combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -576,8 +579,9 @@ def main():
     # Overlay
     plot_overlay(
         all_dfs,
-        args.outdir / "ramachandran_overlay.png",
+        args.outdir / "ramachandran_overlay",
         annotate_native=args.annotate,
+        formats=args.formats,
     )
 
     # Native-vs-prediction residue table
@@ -591,10 +595,10 @@ def main():
 
     print(f"\nOutputs written to: {args.outdir.resolve()}")
     print("  - one *_phi_psi.csv per structure")
-    print("  - one *_ramachandran.png/.svg per structure")
+    print(f"  - one *_ramachandran plot per structure ({', '.join(args.formats)})")
     print("  - all_structures_phi_psi.csv")
     print("  - native_vs_predictions_torsions.csv")
-    print("  - ramachandran_overlay.png")
+    print(f"  - ramachandran_overlay plot ({', '.join(args.formats)})")
     print(
         "\nImportant: alpha_R_like / alpha_L_like / beta_like are broad "
         "heuristic basin labels for inspection, not formal validation regions."

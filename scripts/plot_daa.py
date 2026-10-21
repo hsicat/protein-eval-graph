@@ -16,6 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import yaml
+from plot_metrics import parse_formats
 
 
 D_CCD = frozenset("DAL DAR DAS DCY DGL DGN DHI DIL DLE DLY DPN DPR DSG DSN DTH DTR DTY DVA MED".split())
@@ -113,7 +114,7 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
         writer.writerows(rows)
 
 
-def plot(samples: list[dict], outdir: Path) -> None:
+def plot(samples: list[dict], outdir: Path, formats: tuple[str, ...] = ("svg",)) -> None:
     ordered = sorted(samples, key=lambda r: (-r["d_fraction"], -r["d_residues"], r["sample_id"]))
     labels = [r["sample_id"] for r in ordered]
     ys = list(range(len(ordered)))
@@ -133,7 +134,7 @@ def plot(samples: list[dict], outdir: Path) -> None:
         ax.spines[["top", "right"]].set_visible(False)
     fig.suptitle("D-amino-acid composition by input", weight="bold", y=1.015)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
-    for ext in ("png", "svg"):
+    for ext in formats:
         fig.savefig(outdir / f"daa_composition.{ext}", dpi=220, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
@@ -143,13 +144,14 @@ def main() -> None:
     parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--glob", default="auto", help="Recursive file pattern, or auto (prefer compact *_ccd.yaml files)")
+    parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated output formats: svg,png,pdf (default: svg)")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     samples, chains, without_d = extract(args.inputs, args.glob)
     write_csv(args.output_dir / "sample_summary.csv", samples, list(samples[0]))
     write_csv(args.output_dir / "chain_details.csv", chains, list(chains[0]))
     write_csv(args.output_dir / "inputs_without_d_residues.csv", [{"sample_id": s} for s in without_d], ["sample_id"])
-    plot(samples, args.output_dir)
+    plot(samples, args.output_dir, args.formats)
     print(f"Plotted {len(samples)} inputs; {len(without_d)} inputs had no D-containing chain")
 
 
