@@ -1,31 +1,30 @@
 ---
 name: protein-eval-graph
-description: Generate D-amino-acid composition and D-content group oracle plots, folding/docking comparisons, seed-selection bars, chirality scatter, seed-range, metric-distribution, and Ramachandran plots from protein evaluation data. Use for plotting existing protein prediction evaluations, not for calculating structure scores.
+description: Generate RCG manuscript-formatted D-amino-acid composition and D-content group plots, folding/docking comparisons, seed-selection bars, chirality scatter, seed-range, metric-distribution, and Ramachandran plots from existing protein evaluation data. Apply the RCG Paper Figure/Table Formatting rules; do not calculate structure scores.
 ---
 
 # Protein evaluation graphs
 
-Use the bundled scripts to plot existing evaluation results. Read [references/graph-types.md](references/graph-types.md) for the selected graph's inputs, aggregation, selection rule, and example command. The repository [README.md](README.md) documents installation and all graph types.
+Use the bundled scripts to plot existing evaluation results. **Before any paper figure, read [references/rcg-formatting.md](references/rcg-formatting.md)** and its [Notion source snapshot](references/rcg-notion-source.md). The user's live Notion page “RCG Paper Figure/Table Formatting” is authoritative when accessible. Read [references/graph-types.md](references/graph-types.md) for the selected graph's inputs and selection rules. The [README.md](README.md) has CLI examples. The Notion rules supersede older color, name, and chirality-aggregation instructions in prior figures.
 
 ## Workflow
 
-1. Identify the requested graph and inspect the relevant inputs: `batch_summary.csv`, Boltz/AF3 input YAML or JSON, or native/predicted CIF/PDB structures. Confirm model labels, seed identifiers, sample IDs, and the applicable chain mapping. Do not infer biological chain roles from file names.
+1. Identify the graph and inspect `batch_summary.csv`, input YAML/JSON, or native/predicted structures. Confirm model/condition labels, seed identifiers, sample IDs, chain mapping, score provenance, selected structure files, missing values, and whether the requested metrics implement the RCG definitions. Do not infer biological chain roles from filenames. Do not call a source metric the RCG heavy-atom lDDT or D-Cα correctness until its calculation and site set are verified.
 2. Run the matching `scripts/plot_metrics.py` subcommand, `scripts/plot_daa.py`, `scripts/plot_daa_groups.py`, or `scripts/ramachandran_compare.py`. Use a separate output directory. For a mixed-method batch CSV, use each `--source NAME=CSV::PATH_METHOD` filter; for a one-method CSV, `--source NAME=CSV` suffices.
-3. Check the written plot-data CSV and image files. Report exclusions, unavailable metrics, selection rule, aggregation, and any unmatched pairs. Never silently replace a requested metric or treat different seeds as independent biological inputs.
+3. Complete the generated `caption_draft.md` using the template in `rcg-formatting.md`: observation unit, matched systems, seeds, structure selection, score and alignment definitions, box/error-bar meanings, missing-data handling, and evaluation restrictions. Use `--figure-id FigNN --version vNN` for a figure-number/content/version filename in final delivery. Check plot-data CSVs, missing/skipped/unmatched reports, selected-structure paths, and rendered figures at their final 90/180 mm width. Never replace missing data by zero or treat seeds as independent systems.
 
 ## Shared formatting and meaning
 
-- Folding: **Target self-aligned backbone RMSD**, **Binder self-aligned backbone RMSD**, **Global all-atom lDDT**, **Chirality accuracy**.
-- Docking: **Interface lDDT**, **DockQ**, **Target-aligned binder backbone RMSD**. **Interface RMSD** is the eighth comparison panel when available.
-- Put `(↑ better)` or `(↓ better)` beside metric panel titles. Use blue for non-steering and orange for steering. Keep a metric's axis scale consistent across methods in a figure.
+- Folding: **Target self-aligned backbone RMSD**, **Binder self-aligned backbone RMSD**, **Global heavy-atom lDDT**, **D-Cα chirality correctness**.
+- Docking: **Interface heavy-atom lDDT**, **DockQ**, **Target-aligned binder backbone RMSD**. **Interface RMSD** is an optional eighth panel; define it explicitly because it is not one of the Notion page's standardized metric names.
+- Put `(↑ better)` or `(↓ better)` beside metric panel titles. The arrow is not part of the metric name. Use the exact comparison-specific colors and base-model markers in `rcg-formatting.md`: same-model treatments use blue/teal, orange, aquamarine, violet; cross-model figures use AF3 brown, Boltz-1 blue, Boltz-2 green families. Keep a metric's scale consistent across directly compared methods.
 - When a figure has multiple metric panels, use exactly two rows: folding metrics in the first row and docking metrics in the second. A single-metric figure can use one panel.
-- Save SVG only by default. Pass `--formats svg,png,pdf` when PNG or PDF is requested; other combinations are allowed.
-- RMSD uses Å; lDDT and DockQ use 0–1; chirality accuracy uses percent. RMSD values are lower-is-better. Other listed metrics are higher-is-better.
-- Aggregate binder-group RMSDs to one median per prediction before comparing predictions. For Interface RMSD, use the median across interfaces. Across selected inputs, show medians for RMSDs, arithmetic means for lDDT and DockQ, and residue-pooled chirality accuracy when residue counts are available.
-- For seed-selection bars, state that aggregation on each panel's Y axis: `Median (Å)` for RMSDs, `Mean (score)` for lDDT and DockQ, and `Residue-pooled accuracy (%)` for chirality.
-- DAA-content group figures use D-residue chirality accuracy, whereas the other figures use pooled D/L chirality accuracy. Group inputs by each D-containing chain's D-residue proportion (Single D, Partial D, All D); require a consistent group within each input.
+- Use Arial at final-size 90 mm single-panel or 180 mm multi-panel width; 9 pt axis/panel text, 8 pt ticks, legend and statistics; no default whole-figure title. Export SVG only by default, with editable text. `--formats svg,png,pdf` adds requested outputs; PNG is a 300 dpi preview. The workstation's Arial files restrict embedding, so verify font availability/embedding before external submission.
+- RMSD uses Å; lDDT/DockQ are 0–1; D-Cα correctness is percent. RMSDs are lower-is-better. Never use an assessable-site denominator when the RCG definition requires all prespecified target D sites. Preserve correct/target/assessable/unassessable site counts and explain missing sites.
+- Across selected systems, use medians for RMSDs, means for lDDT and DockQ, and a **system-equal mean** of D-Cα correctness. Label pooled-site results explicitly if separately requested. For seed-selection bars, name the aggregation on the Y axis and label error bars as SD.
+- Group DAA-content inputs using each D-containing chain's D proportion (Single D, Partial D, All D), requiring a consistent group within each input. Use the RCG palette for the compared models/conditions.
 - Top-1 means highest supplied confidence score. A metric-specific oracle means the best observed seed for *that metric*, selected separately for each input and method; it is descriptive and not an achievable multi-metric prediction. If confidence scores are absent, request them or use a user-specified selection instead of inventing top-1.
-- Pair two methods by input ID for one selected seed per input; for all-seed scatter plots, connect only equal input ID **and** equal seed ID. Do not draw arbitrary connections.
+- Pair two methods by input ID for one selected seed per input; for all-seed scatter plots, connect only equal input ID **and** equal seed ID. Show only matched observations in a paired comparison and report unmatched cases. Never claim metrics from independent metric-wise oracle panels came from one structure.
 - For Ramachandran overlays, use explicitly selected native and predicted chain IDs. Sequence/residue numbering mismatches must be noted when interpreting per-residue differences.
 
 The plotting scripts do not score structures. Use `protein-eval-skill` first when evaluation CSVs do not yet exist.

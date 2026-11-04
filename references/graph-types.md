@@ -1,6 +1,6 @@
 # Plot selection and data rules
 
-Read the matching section when a graph is requested. The [README](../README.md) has install and CLI examples.
+Read the matching section when a graph is requested and apply the [RCG formatting and data rules](rcg-formatting.md). The [README](../README.md) has install and CLI examples.
 
 ## DAA composition
 
@@ -10,7 +10,7 @@ Use `plot_daa.py` on Boltz YAML or AF3 JSON inputs. Count a residue only when it
 
 Use `plot_daa_groups.py --chain-details PATH --source BASELINE=CSV --source STEERING=CSV --output-dir DIR`. Obtain `chain_details.csv` from `plot_daa.py` or supply the older research CSV with `sample`, `length`, and `d_residues`. Group each D-containing chain as **Single D** (one D residue), **Partial D** (more than one but fewer than chain length), or **All D** (every residue D). Require all D-containing chains of one input to have the same group. The comparison uses only inputs present and fully scored for every requested metric in both sources. Use `--expected-seeds N` to require an exact evaluated seed count per input and source; exclusions and reasons go into `excluded_inputs.csv`.
 
-For each input and metric, choose its best seed independently: minimize RMSDs; maximize lDDT, DockQ, and **D-residue chirality accuracy**. The D-residue accuracy differs from the pooled D/L chirality shown elsewhere. Group bars use the median of input oracle values for RMSDs and the arithmetic mean for bounded metrics, including D-residue accuracy. Boxplots show input oracle values (one dot per input), median and IQR, with 1.5-IQR whiskers. `seed_metrics.csv`, `input_metrics.csv`, and `group_metrics.csv` expose the underlying values, selected seeds, and aggregation. The first source is blue and the second orange. The figure uses two metric rows, folding above docking.
+For each input and metric, choose its best seed independently: minimize RMSDs; maximize lDDT, DockQ, and **D-Cα chirality correctness**. The correctness denominator includes all targeted D sites, including unassessable sites. Group bars use the median of input oracle values for RMSDs and the arithmetic mean for bounded metrics, including system-equal D-Cα correctness. Boxplots show input oracle values (one dot per input), median and IQR, with 1.5-IQR whiskers. `seed_metrics.csv`, `input_metrics.csv`, and `group_metrics.csv` expose values, selected seeds, and aggregation. Colors follow the one-model or cross-model palette, according to source labels. The figure uses two metric rows, folding above docking.
 
 ## Folding/docking comparison
 
@@ -18,13 +18,12 @@ Use `plot_metrics.py compare --input-id ID` with one or more model sources. Eigh
 
 ## Seed-selection bars
 
-Use `selection-bars` for top-1 versus metric-specific oracle. Top-1 requires a `confidence_score` column, `--confidence-csv`, or adjacent Boltz confidence JSON files via `--confidence-root`. `--scope common` retains IDs with both methods; `--scope all` uses available IDs per method. RMSDs are medians across selected inputs; lDDT, iLDDT, and DockQ are arithmetic means; chirality is pooled over assessable residues when counts are present. Label each panel's Y axis with this aggregation: median, mean, or residue-pooled accuracy, respectively. `--error-bars` shows sample SD of selected input-level values, **not** uncertainty of the aggregate. `--oracle-target chirality` reproduces the older single-chirality-oracle selection on every panel.
-Oracle ties prefer higher chirality accuracy, then lower target-aligned binder backbone RMSD, then the lowest seed ID.
+Use `selection-bars` for top-1 versus metric-specific oracle. Top-1 requires a `confidence_score` column, `--confidence-csv`, or adjacent Boltz confidence JSON files via `--confidence-root`. `--scope common` retains IDs with both methods; `--scope all` uses available IDs per method and is not a paired comparison. RMSDs are medians across selected inputs; lDDT, interface lDDT, DockQ, and D-Cα correctness are system-equal arithmetic means. Label each panel's Y axis with this aggregation. `--error-bars` shows sample SD of selected system-level values, **not** uncertainty of the aggregate. `--oracle-target chirality` selects the same D-Cα-oracle structure across panels; otherwise each metric panel has its own selected structure.
+Oracle ties prefer higher D-Cα correctness, then lower target-aligned binder backbone RMSD, then the lowest seed ID.
 
 ## Chirality-versus-structure scatter
 
-Use `scatter --selection all|top1|oracle`. The default six structure metrics plus Interface RMSD are plotted against pooled D/L chirality accuracy; chirality-versus-itself is omitted by default. For `oracle`, select the best seed separately for each Y metric, model, and input; its actual chirality accuracy supplies X. With two methods, connect same input IDs for selected points. For `all`, connect only points with the same input and seed IDs. Correlations printed on panels are descriptive; seeds from one input are repeated observations.
-RMSD Y axes use a symmetric log scale, linear up to 2 Å, to show small errors and large outliers together.
+Use `scatter --selection all|top1|oracle`. The default six structure metrics plus optional Interface RMSD are plotted against **D-Cα chirality correctness**; chirality-versus-itself is omitted by default. For `oracle`, select the best seed separately for each Y metric, model, and input; its actual D-Cα correctness supplies X. With two methods, show only common input IDs for selected points; for `all`, only common input **and seed** IDs. Connect these with 0.6 pt light-gray dotted lines. `scatter_unmatched.csv` records unmatched observations. Correlations are descriptive; seeds from one input are repeated observations. RMSD Y axes are linear from zero and cover all observations.
 
 ## Seed min–max
 
@@ -32,10 +31,10 @@ Use `seed-range` with two model sources, normally non-steering and steering. One
 
 ## Metric distributions
 
-Use `distribution --input-id ID` with the unsteered source first and steered source second. A violin, box, and individual blue points show the unsteered seeds; orange diamonds show each steered result. The typical comparison is 50 versus 3–5 seeds, but the script records the actual counts. Both groups must have values for every requested metric.
+Use `distribution --input-id ID` with the baseline source first and steering source second. A violin, box, and individual points show baseline seeds; other points show each steered result. Colors follow the Notion palette, and marker shape identifies base model only. The typical comparison is 50 versus 3–5 seeds, but the script records actual counts. Both groups must have values for every requested metric; seeds remain repeated observations of one system.
 
 ## Ramachandran overlay
 
 Use `ramachandran_compare.py --native FILE CHAIN LABEL --pred FILE CHAIN LABEL`. Native and predicted chain IDs must be explicitly supplied from known chain mappings. The script computes φ/ψ from backbone atoms N, CA, C, omits absent or disconnected torsions, exports per-structure CSVs, SVG single plots and an overlay, and a residue comparison CSV. Per-residue comparison uses residue numbers and insertion codes; verify numbering before interpreting differences. Read labels as structure identities, not quality classes.
 
-All plotting scripts save SVG only by default. Pass `--formats svg,png,pdf` for additional PNG/PDF images. Multi-metric figures place folding panels on the first row and docking panels on the second.
+All plotting scripts save SVG only by default, with editable Arial text and final-size layout. Pass `--formats svg,png,pdf` for additional PNG/PDF images; PNG renders at 300 dpi. Multi-metric figures place folding panels on the first row and docking panels on the second. Complete the manuscript caption and verify metric provenance before submission.

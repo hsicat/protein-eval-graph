@@ -39,6 +39,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from Bio.PDB import MMCIFParser, PDBParser
 from plot_metrics import parse_formats
+from rcg_style import DOUBLE_WIDTH, PAIR_LINE, REFERENCE, SINGLE_WIDTH, display_name, model_color, model_marker, named_stem, save_figure, setup_style
 
 
 # ---------------------------------------------------------------------------
@@ -268,27 +269,12 @@ def setup_ramachandran_axes(ax, title: str):
     ax.set_ylim(-180, 180)
     ax.set_xticks([-180, -120, -60, 0, 60, 120, 180])
     ax.set_yticks([-180, -120, -60, 0, 60, 120, 180])
-    ax.axhline(0, linewidth=0.7, alpha=0.35)
-    ax.axvline(0, linewidth=0.7, alpha=0.35)
-    ax.grid(alpha=0.18)
+    ax.axhline(0, linewidth=0.7, color=PAIR_LINE, linestyle="--")
+    ax.axvline(0, linewidth=0.7, color=PAIR_LINE, linestyle="--")
 
     ax.set_xlabel(r"$\phi$ (degrees)")
     ax.set_ylabel(r"$\psi$ (degrees)")
-    ax.set_title(title)
-
-    # Approximate reference centers, intentionally labeled as "approx."
-    ax.text(
-        -60, -45, r"$\alpha_R$ approx.",
-        ha="center", va="center", fontsize=9, alpha=0.45
-    )
-    ax.text(
-        60, 45, r"$\alpha_L$ approx.",
-        ha="center", va="center", fontsize=9, alpha=0.45
-    )
-    ax.text(
-        -125, 130, r"$\beta$ approx.",
-        ha="center", va="center", fontsize=9, alpha=0.45
-    )
+    ax.set_title(title, loc="left", fontsize=9, weight="bold")
 
     ax.set_aspect("equal", adjustable="box")
 
@@ -298,10 +284,11 @@ def sanitize_filename(text: str) -> str:
     return text.strip("_") or "structure"
 
 
-def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False, formats: tuple[str, ...] = ("svg",)):
+def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False, formats: tuple[str, ...] = ("svg",),
+                is_native: bool = False, prediction_labels: list[str] | None = None):
     valid = df.dropna(subset=["phi_deg", "psi_deg"])
 
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(SINGLE_WIDTH, SINGLE_WIDTH))
     setup_ramachandran_axes(
         ax,
         f"{df['structure'].iloc[0]} — chain {df['chain'].iloc[0]}"
@@ -310,8 +297,10 @@ def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False, format
     ax.scatter(
         valid["phi_deg"],
         valid["psi_deg"],
-        s=48,
+        s=12.25,
         alpha=0.85,
+        color=REFERENCE if is_native else model_color(str(df["structure"].iloc[0]), prediction_labels or [str(df["structure"].iloc[0])]),
+        marker="o" if is_native else model_marker(str(df["structure"].iloc[0])),
     )
 
     if annotate:
@@ -321,14 +310,12 @@ def plot_single(df: pd.DataFrame, out_path: Path, annotate: bool = False, format
                 (row["phi_deg"], row["psi_deg"]),
                 xytext=(4, 4),
                 textcoords="offset points",
-                fontsize=7,
+                fontsize=8,
                 alpha=0.85,
             )
 
     fig.tight_layout()
-    for fmt in formats:
-        fig.savefig(out_path.with_suffix(f".{fmt}"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, out_path, formats)
 
 
 def plot_overlay(
@@ -337,27 +324,26 @@ def plot_overlay(
     annotate_native: bool = False,
     formats: tuple[str, ...] = ("svg",),
 ):
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(DOUBLE_WIDTH, DOUBLE_WIDTH))
     setup_ramachandran_axes(ax, "Native vs predictions — Ramachandran overlay")
 
-    markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">"]
+    prediction_labels = [str(df["structure"].iloc[0]) for df in datasets[1:]]
 
     for i, df in enumerate(datasets):
         valid = df.dropna(subset=["phi_deg", "psi_deg"])
-        marker = markers[i % len(markers)]
-
         label = str(df["structure"].iloc[0])
-        lower = label.lower()
-        is_steering = ("steer" in lower and not any(x in lower for x in ("no_steer", "nonsteer", "unsteer"))) or lower.endswith(("1x", "2x"))
-        color = "#64748B" if i == 0 else ("#E87528" if is_steering else "#2563A6")
+        marker = "o" if i == 0 else model_marker(label)
+        color = REFERENCE if i == 0 else model_color(label, prediction_labels)
         ax.scatter(
             valid["phi_deg"],
             valid["psi_deg"],
-            s=52 if i == 0 else 40,
+            s=25 if i == 0 else 12.25,
             marker=marker,
-            color=color,
+            facecolors="none" if i == 0 else color,
+            edgecolors=color,
+            linewidths=1.0 if i == 0 else 0.5,
             alpha=0.8,
-            label=label,
+            label="Ground truth" if i == 0 else display_name(label),
         )
 
         # Usually only annotate native to avoid an unreadable plot.
@@ -368,15 +354,13 @@ def plot_overlay(
                     (row["phi_deg"], row["psi_deg"]),
                     xytext=(4, 4),
                     textcoords="offset points",
-                    fontsize=7,
+                    fontsize=8,
                     alpha=0.8,
                 )
 
-    ax.legend(frameon=True, fontsize=9)
+    ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    for fmt in formats:
-        fig.savefig(out_path.with_suffix(f".{fmt}"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, out_path, formats)
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +499,8 @@ def parse_args():
         help="Output directory (default: ramachandran_output)",
     )
     parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated output formats: svg,png,pdf (default: svg)")
+    parser.add_argument("--figure-id", help="Final manuscript figure number, e.g. Fig05")
+    parser.add_argument("--version", default="v01", help="Final manuscript version (default: v01)")
 
     parser.add_argument(
         "--annotate",
@@ -537,6 +523,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    setup_style()
     args.outdir.mkdir(parents=True, exist_ok=True)
 
     native_file, native_chain, native_label = args.native
@@ -564,10 +551,11 @@ def main():
         safe = sanitize_filename(label)
 
         csv_path = args.outdir / f"{safe}_phi_psi.csv"
-        plot_path = args.outdir / f"{safe}_ramachandran"
+        plot_path = named_stem(args.outdir, f"{safe}_ramachandran", args.figure_id, args.version)
 
         df.to_csv(csv_path, index=False)
-        plot_single(df, plot_path, annotate=args.annotate, formats=args.formats)
+        plot_single(df, plot_path, annotate=args.annotate, formats=args.formats,
+                    is_native=df is native_df, prediction_labels=[str(p["structure"].iloc[0]) for p in pred_dfs])
 
     # Combined long-form CSV
     combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -579,7 +567,7 @@ def main():
     # Overlay
     plot_overlay(
         all_dfs,
-        args.outdir / "ramachandran_overlay",
+        named_stem(args.outdir, "ramachandran_overlay", args.figure_id, args.version),
         annotate_native=args.annotate,
         formats=args.formats,
     )
@@ -590,6 +578,14 @@ def main():
         args.outdir / "native_vs_predictions_torsions.csv",
         index=False,
     )
+    (args.outdir / "caption_draft.md").write_text(
+        f"# Caption draft — complete before manuscript use\n\nFigure {args.figure_id[3:] if args.figure_id else 'X'}. "
+        f"Ramachandran comparison of native {native_label} chain {native_chain} with "
+        + ", ".join(f"{label} chain {chain}" for _, chain, label in args.pred) + ". "
+        "Each point is one backbone-complete residue with defined φ and ψ. "
+        f"D-residue reference: the native structure. Site filter: residues with N, Cα, C and peptide C–N distances ≤ {args.peptide_bond_cutoff:g} Å. "
+        "Both axes span −180° to 180°. [State how D-residue sites were identified, any numbering mismatches, "
+        "and the relevant structure-selection rule.]\n", encoding="utf-8")
 
     print_summary(native_df, pred_dfs, comparison_df)
 

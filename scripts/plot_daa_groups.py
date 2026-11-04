@@ -9,8 +9,9 @@ import statistics as stats
 from collections import defaultdict
 from pathlib import Path
 
-from plot_metrics import BLUE, ORANGE, BY_KEY as BASE_METRICS, Metric, load_predictions, panels, parse_formats, save, setup_style, write_csv
+from plot_metrics import BY_KEY as BASE_METRICS, Metric, load_predictions, method_color, panels, parse_formats, save, setup_style, write_csv
 from matplotlib.patches import Patch
+from rcg_style import INK, display_name, model_marker, named_stem, ordered_models, panel_title
 
 
 GROUP_ORDER = ("Single D", "Partial D", "All D")
@@ -18,7 +19,7 @@ METRICS = (
     BASE_METRICS["target"],
     BASE_METRICS["binder"],
     BASE_METRICS["lddt"],
-    Metric("daa_chirality", "D-residue chirality accuracy", "chirality_daa_accuracy_pct", "%", True, "Folding"),
+    Metric("daa_chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
     BASE_METRICS["ilddt"],
     BASE_METRICS["dockq"],
     BASE_METRICS["placed"],
@@ -121,11 +122,9 @@ def prepare(predictions: list[dict], groups: dict[str, dict], models: list[str],
 
 
 def style_axis(ax, metric: Metric, values: list[float], groups: list[str], counts: dict[str, int]) -> None:
-    import textwrap
-    ax.set_title(textwrap.fill(metric.label, 29) + f"\n({'↑' if metric.higher else '↓'} better)", loc="left", fontsize=9, weight="bold")
-    ax.set_ylabel(metric.unit)
-    ax.set_xticks(range(len(groups)), [f"{g}\n(n={counts[g]})" for g in groups], fontsize=8)
-    ax.grid(axis="y", color="#E2E8F0", linewidth=0.7)
+    ax.set_title(panel_title(metric.label, metric.higher), loc="left", fontsize=9, weight="bold")
+    ax.set_ylabel(metric.label if metric.unit == "score" else f"{metric.label} ({metric.unit})")
+    ax.set_xticks(range(len(groups)), [f"{g.replace(' ', chr(10))}\n(n={counts[g]})" for g in groups], fontsize=8)
     ax.set_axisbelow(True)
     ax.spines[["top", "right"]].set_visible(False)
     if metric.unit == "%":
@@ -134,14 +133,13 @@ def style_axis(ax, metric: Metric, values: list[float], groups: list[str], count
         ax.set_ylim(0, 1.05)
     else:
         high = max(values) * 1.18 if values else 1
-        if high > 10:
-            ax.set_yscale("symlog", linthresh=2)
         ax.set_ylim(0, high)
 
 
 def plot_bars(group_rows: list[dict], models: list[str], groups: list[str], keys: list[str],
-              outdir: Path, formats: tuple[str, ...]) -> None:
-    fig, axes = panels(keys, "Metric-wise best seed per input, then D-content group summary", BY_KEY)
+              outdir: Path, formats: tuple[str, ...], discussion_title: bool = False,
+              figure_id: str | None = None, version: str = "v01") -> None:
+    fig, axes = panels(keys, "Metric-wise best seed per input, then D-content group summary", BY_KEY, discussion_title)
     lookup = {(r["model"], r["metric"], r["group"]): r for r in group_rows}
     counts = {group: lookup[(models[0], keys[0], group)]["n_inputs"] for group in groups}
     for key in keys:
@@ -151,20 +149,18 @@ def plot_bars(group_rows: list[dict], models: list[str], groups: list[str], keys
             heights = [lookup[(model, key, group)]["group_oracle_value"] for group in groups]
             values.extend(heights)
             positions = [i + (-0.18 if index == 0 else 0.18) for i in range(len(groups))]
-            bars = ax.bar(positions, heights, width=0.34, color=BLUE if index == 0 else ORANGE, label=model, zorder=3)
-            for bar, value in zip(bars, heights):
-                ax.annotate(f"{value:.1f}" if metric.unit == "%" else f"{value:.2f}",
-                            (bar.get_x() + bar.get_width() / 2, value), xytext=(0, 3),
-                            textcoords="offset points", ha="center", va="bottom", fontsize=7)
+            ax.bar(positions, heights, width=0.34, color=method_color(model, set(), models), zorder=3)
         style_axis(ax, metric, values, groups, counts)
-        ax.legend(frameon=False, fontsize=8)
-    fig.tight_layout()
-    save(fig, outdir / "group_oracle_bars", formats)
+    fig.legend(handles=[Patch(facecolor=method_color(model, set(), models), label=display_name(model)) for model in models],
+               loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=len(models), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    save(fig, named_stem(outdir, "group_oracle_bars", figure_id, version), formats)
 
 
 def plot_boxes(input_rows: list[dict], models: list[str], groups: list[str], keys: list[str],
-               outdir: Path, formats: tuple[str, ...]) -> None:
-    fig, axes = panels(keys, "Metric-wise input oracles by D-content group · each dot is one input", BY_KEY)
+               outdir: Path, formats: tuple[str, ...], discussion_title: bool = False,
+               figure_id: str | None = None, version: str = "v01") -> None:
+    fig, axes = panels(keys, "Metric-wise input oracles by D-content group · each dot is one input", BY_KEY, discussion_title)
     counts = {group: sum(r["group"] == group and r["model"] == models[0] and r["metric"] == keys[0] for r in input_rows) for group in groups}
     for key in keys:
         ax, metric = axes[key], BY_KEY[key]
@@ -175,21 +171,21 @@ def plot_boxes(input_rows: list[dict], models: list[str], groups: list[str], key
                 values = [r["oracle_value"] for r in rows]
                 all_values.extend(values)
                 position = group_index + (-0.18 if model_index == 0 else 0.18)
-                color = BLUE if model_index == 0 else ORANGE
+                color = method_color(model, set(), models)
                 ax.boxplot(values, positions=[position], widths=0.27, patch_artist=True,
                            showfliers=False, manage_ticks=False,
                            boxprops={"facecolor": color, "alpha": 0.35, "edgecolor": color},
-                           medianprops={"color": "#1E293B", "linewidth": 1.8},
+                           medianprops={"color": INK, "linewidth": 1.0},
                            whiskerprops={"color": color}, capprops={"color": color})
                 jitter = [0 if len(values) == 1 else -0.085 + 0.17 * i / (len(values) - 1) for i in range(len(values))]
-                ax.scatter([position + delta for delta in jitter], values, s=15, alpha=0.75,
-                           color=color, edgecolors="white", linewidths=0.3, zorder=3)
+                ax.scatter([position + delta for delta in jitter], values, s=12.25, alpha=0.85,
+                           color=color, marker=model_marker(model), edgecolors="white", linewidths=0.3, zorder=3)
         style_axis(ax, metric, all_values, groups, counts)
         ax.set_xlim(-0.55, len(groups) - 0.45)
-        ax.legend(handles=[Patch(facecolor=BLUE, label=models[0]), Patch(facecolor=ORANGE, label=models[1])],
-                  frameon=False, fontsize=8)
-    fig.tight_layout()
-    save(fig, outdir / "group_oracle_boxplots", formats)
+    fig.legend(handles=[Patch(facecolor=method_color(model, set(), models), label=display_name(model)) for model in models],
+               loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=len(models), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    save(fig, named_stem(outdir, "group_oracle_boxplots", figure_id, version), formats)
 
 
 def main() -> None:
@@ -201,6 +197,9 @@ def main() -> None:
     parser.add_argument("--seed-regex", help="Regex with a capture group for seed ID")
     parser.add_argument("--expected-seeds", type=int, help="Require this many evaluated seeds per input and model")
     parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated svg,png,pdf (default: svg)")
+    parser.add_argument("--figure-id", help="Final manuscript figure number, e.g. Fig05")
+    parser.add_argument("--version", default="v01", help="Final manuscript version (default: v01)")
+    parser.add_argument("--discussion-title", action="store_true", help="Add an 11 pt whole-figure title for standalone discussion figures")
     args = parser.parse_args()
     if len(args.source) != 2:
         parser.error("Exactly two --source arguments are required")
@@ -212,7 +211,7 @@ def main() -> None:
     setup_style()
     groups = read_groups(args.chain_details)
     predictions = load_predictions(args.source, args.seed_regex, None)
-    models = list(dict.fromkeys(point["model"] for point in predictions))
+    models = ordered_models(list(dict.fromkeys(point["model"] for point in predictions)))
     excluded, seed_rows, input_rows, group_rows = prepare(predictions, groups, models, keys, args.expected_seeds)
     present_groups = [group for group in GROUP_ORDER if any(row["group"] == group for row in input_rows)]
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -223,8 +222,25 @@ def main() -> None:
         writer = csv.DictWriter(handle, fieldnames=["sample_id", "group", "reason"])
         writer.writeheader()
         writer.writerows(excluded)
-    plot_bars(group_rows, models, present_groups, keys, args.output_dir, args.formats)
-    plot_boxes(input_rows, models, present_groups, keys, args.output_dir, args.formats)
+    plot_bars(group_rows, models, present_groups, keys, args.output_dir, args.formats, args.discussion_title, args.figure_id, args.version)
+    plot_boxes(input_rows, models, present_groups, keys, args.output_dir, args.formats, args.discussion_title, args.figure_id, args.version)
+    counts = {group: sum(row["group"] == group and row["model"] == models[0] and row["metric"] == keys[0]
+                         for row in input_rows) for group in present_groups}
+    caption = (
+        f"# Caption draft — complete and verify before manuscript use\n\n"
+        f"Figure {args.figure_id[3:] if args.figure_id else 'X'}. [Main finding for D-content groups]. "
+        f"Models: {display_name(models[0])} and {display_name(models[1])}. "
+        f"Matched systems: {sum(counts.values())}; group sizes: "
+        + ", ".join(f"{group} n={counts[group]}" for group in present_groups) + ". "
+        f"Each dot is one system; predictions have {args.expected_seeds or 'variable'} evaluated seeds per system and model. "
+        "The best seed is selected independently for each metric and system; these panels do not form a joint structure profile. "
+        "Bars show system-level medians for RMSD and system-equal means for lDDT, DockQ and D-Cα correctness. "
+        "Boxes show median and interquartile range; whiskers reach the most extreme observations within 1.5×IQR; all system values are shown. "
+        "D-Cα correctness uses correct/target D-site counts, including unassessable target sites in the denominator. "
+        f"Excluded systems: {len(excluded)} (see excluded_inputs.csv). "
+        "[Verify score provenance, chain mapping, lDDT implementation, and all other evaluation restrictions.]\n"
+    )
+    (args.output_dir / "caption_draft.md").write_text(caption, encoding="utf-8")
     print(f"Plotted {len(set(row['sample_id'] for row in input_rows))} common inputs; excluded {len(excluded)}. Figures: {', '.join(args.formats)}")
 
 

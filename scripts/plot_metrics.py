@@ -11,6 +11,7 @@ import os
 import re
 import statistics as stats
 import tempfile
+import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +22,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from rcg_style import (CONDITION_COLORS, DOUBLE_WIDTH, INK, PAIR_LINE, SINGLE_WIDTH,
+                       SOURCE_URL, display_name, label_metric, letter_panels, model_color,
+                       model_identity, model_marker, named_stem, ordered_models, panel_title, save_figure,
+                       setup_style as rcg_setup_style)
 
 
-BLUE = "#2563A6"
-ORANGE = "#E87528"
+BLUE = CONDITION_COLORS["baseline"]
+ORANGE = CONDITION_COLORS["steering"]
 RMSD_FIELDS = {"target", "binder", "placed", "irmsd"}
 
 
@@ -45,9 +51,9 @@ class Metric:
 METRICS = (
     Metric("target", "Target self-aligned backbone RMSD", "target_backbone_fit_rmsd_angstrom", "Å", False, "Folding"),
     Metric("binder", "Binder self-aligned backbone RMSD", "binder_self_aligned_backbone_rmsd_angstrom", "Å", False, "Folding"),
-    Metric("lddt", "Global all-atom lDDT", "ost_lddt", "score", True, "Folding"),
-    Metric("chirality", "Chirality accuracy", "chirality_all_accuracy_pct", "%", True, "Folding"),
-    Metric("ilddt", "Interface lDDT", "ost_ilddt", "score", True, "Docking"),
+    Metric("lddt", "Global heavy-atom lDDT", "ost_lddt", "score", True, "Folding"),
+    Metric("chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
+    Metric("ilddt", "Interface heavy-atom lDDT", "ost_ilddt", "score", True, "Docking"),
     Metric("dockq", "DockQ", "ost_dockq_ave", "score", True, "Docking"),
     Metric("placed", "Target-aligned binder backbone RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
     Metric("irmsd", "Interface RMSD", "ost_per_interface_json", "Å", False, "Docking"),
@@ -156,6 +162,8 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
                 "model": model, "sample_id": first["sample_id"],
                 "prediction_path": pred_path, "seed": seed_from_path(pred_path, seed_regex),
                 "status": first["status"], "binder_groups": len(group),
+                "warnings": first.get("warnings", ""),
+                "unavailable_metrics_json": first.get("unavailable_metrics_json", ""),
             }
             for m in METRICS:
                 if m.key in {"binder", "placed"}:
@@ -185,17 +193,12 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
                 if len(vals) != 1:
                     raise ValueError(f"Prediction-level {col} differs across binder rows: {pred_path}")
                 item[col] = vals.pop()
-            item["daa_chirality"] = item["chirality_daa_accuracy_pct"]
-            if item["daa_chirality"] is None:
-                eligible = item["chirality_daa_eligible_count"]
-                skipped = item["chirality_daa_skipped_count"] or 0
-                correct = item["chirality_daa_correct_count"]
-                item["daa_chirality"] = 100 * correct / (eligible - skipped) if eligible and correct is not None and eligible > skipped else None
-            if item["chirality"] is None:
-                eligible = item["chirality_all_eligible_count"]
-                skipped = item["chirality_all_skipped_count"] or 0
-                correct = item["chirality_all_correct_count"]
-                item["chirality"] = 100 * correct / (eligible - skipped) if eligible and correct is not None and eligible > skipped else None
+            # RCG manuscript denominator is all target D sites; unassessable sites
+            # remain in that denominator and are never called verified inversions.
+            eligible = item["chirality_daa_eligible_count"]
+            correct = item["chirality_daa_correct_count"]
+            item["chirality"] = 100 * correct / eligible if eligible and correct is not None else None
+            item["daa_chirality"] = item["chirality"]
             score = confidence.get(pred_path, number(first.get("confidence_score")))
             if score is None and confidence_root is not None:
                 structure = confidence_root / pred_path
@@ -208,11 +211,8 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
     return predictions
 
 
-def method_color(name: str, steering_names: set[str]) -> str:
-    lower = name.lower()
-    negative = any(token in lower for token in ("no_steer", "non_steer", "nonsteer", "unsteer", "baseline"))
-    steering = name in steering_names or (not negative and ("steer" in lower or lower.endswith(("1x", "2x"))))
-    return ORANGE if steering else BLUE
+def method_color(name: str, steering_names: set[str], all_models: list[str] | None = None) -> str:
+    return model_color(name, all_models or [name], steering_names)
 
 
 def selected_metric_keys(args: argparse.Namespace, predictions: list[dict]) -> list[str]:
@@ -264,35 +264,27 @@ def groups_by_input(predictions: list[dict]) -> dict[tuple[str, str], list[dict]
     return groups
 
 
-def write_csv(path: Path, rows: list[dict]) -> None:
-    if not rows:
+def write_csv(path: Path, rows: list[dict], fields: list[str] | None = None) -> None:
+    if not rows and fields is None:
         return
-    fields = list(dict.fromkeys(k for row in rows for k in row))
+    fields = fields or list(dict.fromkeys(k for row in rows for k in row))
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows([{k: "NA" if v is None else v for k, v in row.items()} for row in rows])
 
 
 def save(fig, stem: Path, formats: tuple[str, ...]) -> None:
-    stem.parent.mkdir(parents=True, exist_ok=True)
-    for fmt in formats:
-        fig.savefig(stem.with_suffix(f".{fmt}"), dpi=220, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    save_figure(fig, stem, formats)
 
 
 def setup_style() -> None:
-    plt.rcParams.update({
-        "font.family": "DejaVu Sans", "font.size": 9, "axes.spines.top": False,
-        "axes.spines.right": False, "axes.edgecolor": "#94A3B8",
-        "axes.labelcolor": "#334155", "figure.facecolor": "white",
-    })
+    rcg_setup_style()
 
 
 def metric_axis(ax, metric: Metric) -> None:
-    ax.set_title(metric.title, loc="left", fontsize=10, weight="bold")
-    ax.set_ylabel(metric.unit)
-    ax.grid(axis="y", color="#E2E8F0", linewidth=0.7, zorder=0)
+    ax.set_title(panel_title(metric.label, metric.higher), loc="left", fontsize=9, weight="bold")
+    ax.set_ylabel(label_metric(metric.label, metric.unit))
     if metric.key in {"lddt", "ilddt", "dockq"}:
         ax.set_ylim(0, 1.05)
     elif metric.key == "chirality":
@@ -304,20 +296,23 @@ def metric_axis(ax, metric: Metric) -> None:
 def selection_axis_label(metric: Metric) -> str:
     """Name the across-input aggregation used for a selection bar."""
     if metric.key in RMSD_FIELDS:
-        return f"Median ({metric.unit})"
+        return f"Median {label_metric(metric.label, metric.unit)}"
     if metric.key == "chirality":
-        return "Residue-pooled accuracy (%)"
-    return f"Mean ({metric.unit})"
+        return "Mean D-Cα chirality correctness (%)"
+    return f"Mean {label_metric(metric.label, metric.unit)}"
 
 
-def panels(keys: list[str], title: str, metric_by_key: dict[str, Metric] | None = None):
+def panels(keys: list[str], title: str, metric_by_key: dict[str, Metric] | None = None,
+           discussion_title: bool = False):
     metric_by_key = metric_by_key or BY_KEY
     folding = [key for key in keys if metric_by_key[key].group == "Folding"]
     docking = [key for key in keys if metric_by_key[key].group == "Docking"]
     cols = max(len(folding), len(docking), 1)
     rows = 2 if len(keys) > 1 else 1
-    fig, axes = plt.subplots(rows, cols, figsize=(4.1 * cols, 4.0 * rows), squeeze=False)
-    fig.suptitle(title, fontsize=15, weight="bold", y=1.01)
+    fig, axes = plt.subplots(rows, cols, figsize=(DOUBLE_WIDTH if rows == 2 else SINGLE_WIDTH,
+                                               5.7 if rows == 2 else SINGLE_WIDTH), squeeze=False)
+    if discussion_title:
+        fig.suptitle(title, fontsize=11, weight="bold", ha="left", x=0.04)
     mapped = {}
     for row, group in enumerate((folding, docking) if rows == 2 else (keys,)):
         for col, key in enumerate(group):
@@ -325,21 +320,45 @@ def panels(keys: list[str], title: str, metric_by_key: dict[str, Metric] | None 
     for ax in axes.flat:
         if ax not in mapped.values():
             ax.set_visible(False)
+    letter_panels([mapped[key] for key in (folding + docking) if key in mapped])
     return fig, mapped
 
 
 def describe_points(predictions: list[dict], keys: list[str], outdir: Path) -> None:
-    rows = [{k: p.get(k) for k in ("model", "sample_id", "seed", "prediction_path", "status", "binder_groups", "confidence_score", "chirality_all_correct_count", "chirality_all_eligible_count", "chirality_all_skipped_count", *keys)} for p in predictions]
+    rows = [{k: p.get(k) for k in ("model", "sample_id", "seed", "prediction_path", "status", "binder_groups", "confidence_score", "chirality_daa_correct_count", "chirality_daa_eligible_count", "chirality_daa_skipped_count", "warnings", "unavailable_metrics_json", *keys)} for p in predictions]
     write_csv(outdir / "normalized_predictions.csv", rows)
+    missing = [{"model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"],
+                "prediction_path": p["prediction_path"], "metric": key,
+                "reason": p["unavailable_metrics_json"] or p["warnings"] or "metric value unavailable"}
+               for p in predictions for key in keys if p[key] is None]
+    write_csv(outdir / "missing_values.csv", missing,
+              ["model", "sample_id", "seed", "prediction_path", "metric", "reason"])
+
+
+def describe_skipped(source_specs: list[str], outdir: Path) -> None:
+    skipped = []
+    for spec in source_specs:
+        model, path, method_filter = parse_source(spec)
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if method_filter and path_method(row["prediction_path"]) != method_filter:
+                    continue
+                if row["status"].upper() == "SKIPPED":
+                    skipped.append({"model": model, "sample_id": row["sample_id"],
+                                    "prediction_path": row["prediction_path"],
+                                    "reason": row.get("warnings") or row.get("unavailable_metrics_json") or "evaluation skipped"})
+    unique = list({(r["model"], r["prediction_path"]): r for r in skipped}.values())
+    write_csv(outdir / "skipped_predictions.csv", unique,
+              ["model", "sample_id", "prediction_path", "reason"])
 
 
 def compare(args, predictions, keys):
     points = [p for p in predictions if p["sample_id"] == args.input_id]
     if not points:
         raise ValueError(f"Input {args.input_id} not found")
-    models = list(dict.fromkeys(p["model"] for p in predictions))
+    models = ordered_models(list(dict.fromkeys(p["model"] for p in predictions)), set(args.steering))
     groups = groups_by_input(points)
-    fig, axes = panels(keys, f"{args.input_id}: folding and docking comparison")
+    fig, axes = panels(keys, f"{args.input_id}: folding and docking comparison", discussion_title=args.discussion_title)
     data = []
     for key in keys:
         ax = axes[key]
@@ -348,24 +367,30 @@ def compare(args, predictions, keys):
         for model in models:
             candidates = groups.get((model, args.input_id), [])
             if not candidates:
+                data.append({"model": model, "sample_id": args.input_id, "metric": key, "value": None,
+                             "selection": args.selection, "selection_metric": key, "reason": "input absent"})
                 continue
-            choice = choose(candidates, args.selection, key)
+            selection_metric = args.oracle_target if args.selection == "oracle" and args.oracle_target else key
+            choice = choose(candidates, args.selection, selection_metric)
             if choice[key] is None:
+                data.append({"model": model, "sample_id": args.input_id, "metric": key, "value": None,
+                             "selection": args.selection, "selection_metric": selection_metric,
+                             "seed": choice["seed"], "prediction_path": choice["prediction_path"], "reason": "metric unavailable"})
                 continue
-            labels.append(model)
+            labels.append(textwrap.fill(display_name(model, set(args.steering)), 13))
             vals.append(choice[key])
-            colors.append(method_color(model, set(args.steering)))
-            data.append({"model": model, "sample_id": args.input_id, "metric": key, "value": choice[key], "selection": args.selection, "seed": choice["seed"], "prediction_path": choice["prediction_path"]})
+            colors.append(method_color(model, set(args.steering), models))
+            data.append({"model": model, "sample_id": args.input_id, "metric": key, "value": choice[key], "selection": args.selection, "selection_metric": selection_metric, "seed": choice["seed"], "prediction_path": choice["prediction_path"]})
         if not vals:
             ax.set_visible(False)
             continue
         ax.bar(range(len(vals)), vals, color=colors, width=0.7, zorder=3)
-        ax.set_xticks(range(len(vals)), labels, rotation=35, ha="right")
+        ax.set_xticks(range(len(vals)), labels)
         metric_axis(ax, metric)
         if metric.key not in {"lddt", "ilddt", "dockq", "chirality"}:
             ax.set_ylim(0, max(vals) * 1.18 if max(vals) else 1)
     fig.tight_layout()
-    save(fig, args.output_dir / f"{args.input_id}_comparison", args.formats)
+    save(fig, named_stem(args.output_dir, f"{args.input_id}_comparison", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "comparison_plot_data.csv", data)
 
 
@@ -376,25 +401,20 @@ def aggregate(chosen: list[dict], metric: str) -> tuple[float, float | None, int
     if metric in RMSD_FIELDS:
         center = stats.median(vals)
     elif metric == "chirality":
-        counts = [(p["chirality_all_correct_count"], p["chirality_all_eligible_count"], p["chirality_all_skipped_count"] or 0) for p in chosen]
-        if all(c is not None and e is not None for c, e, _ in counts):
-            den = sum(e - s for _, e, s in counts)
-            center = 100 * sum(c for c, _, _ in counts) / den if den > 0 else stats.mean(vals)
-        else:
-            center = stats.mean(vals)
+        center = stats.mean(vals)  # systems, not D sites, receive equal weight
     else:
         center = stats.mean(vals)
     return center, stats.stdev(vals) if len(vals) > 1 else None, len(vals)
 
 
 def selection_bars(args, predictions, keys):
-    models = list(dict.fromkeys(p["model"] for p in predictions))
+    models = ordered_models(list(dict.fromkeys(p["model"] for p in predictions)), set(args.steering))
     grouped = groups_by_input(predictions)
     ids_by_model = {model: {p["sample_id"] for p in predictions if p["model"] == model} for model in models}
     ids = set.intersection(*ids_by_model.values()) if args.scope == "common" else set.union(*ids_by_model.values())
     if not ids:
         raise ValueError("No input IDs in the requested scope")
-    fig, axes = panels(keys, f"Top-1 versus oracle · {args.scope} inputs")
+    fig, axes = panels(keys, f"Top-1 versus oracle · {args.scope} inputs", discussion_title=args.discussion_title)
     records, selections = [], []
     for key in keys:
         ax = axes[key]
@@ -406,34 +426,41 @@ def selection_bars(args, predictions, keys):
                 for sample_id in sorted(ids):
                     candidates = grouped.get((model, sample_id), [])
                     if not candidates:
+                        selections.append({"metric": key, "model": model, "sample_id": sample_id,
+                                           "selection": mode, "value": None, "reason": "input absent"})
                         continue
                     target_key = args.oracle_target if mode == "oracle" and args.oracle_target else key
                     item = choose(candidates, mode, target_key)
                     if item[key] is None:
+                        selections.append({"metric": key, "model": model, "sample_id": sample_id,
+                                           "selection": mode, "selection_metric": target_key,
+                                           "seed": item["seed"], "prediction_path": item["prediction_path"],
+                                           "value": None, "reason": "metric unavailable"})
                         continue
                     chosen.append(item)
                     selections.append({"metric": key, "model": model, "sample_id": sample_id, "selection": mode, "selection_metric": target_key, "seed": item["seed"], "prediction_path": item["prediction_path"], "value": item[key]})
                 if not chosen:
                     continue
                 center, sd, n = aggregate(chosen, key)
-                label = f"{model}\n{mode}"
-                bar_labels.append(label)
+                bar_labels.append("Top-1" if mode == "top1" else "Oracle")
                 centers.append(center)
                 errors.append(sd or 0)
-                colors.append(method_color(model, set(args.steering)))
-                records.append({"metric": key, "model": model, "selection": mode, "scope": args.scope, "n_inputs": n, "value": center, "sample_sd": sd, "aggregation": "median" if key in RMSD_FIELDS else ("residue pooled" if key == "chirality" else "mean")})
+                colors.append(method_color(model, set(args.steering), models))
+                records.append({"metric": key, "model": model, "selection": mode, "scope": args.scope, "n_inputs": n, "value": center, "sample_sd": sd, "aggregation": "median" if key in RMSD_FIELDS else "system-equal mean"})
         if not centers:
             ax.set_visible(False)
             continue
         x = list(range(len(centers)))
         ax.bar(x, centers, yerr=errors if args.error_bars else None, capsize=3 if args.error_bars else 0, color=colors, width=0.7, zorder=3)
-        ax.set_xticks(x, bar_labels, rotation=35, ha="right")
+        ax.set_xticks(x, bar_labels)
         metric_axis(ax, metric)
         ax.set_ylabel(selection_axis_label(metric))
         if key in RMSD_FIELDS:
             ax.set_ylim(0, max(c + (e if args.error_bars else 0) for c, e in zip(centers, errors)) * 1.18 or 1)
-    fig.tight_layout()
-    save(fig, args.output_dir / f"selection_bars_{args.scope}{'_sd' if args.error_bars else ''}", args.formats)
+    fig.legend(handles=[Patch(facecolor=method_color(model, set(args.steering), models), label=display_name(model, set(args.steering))) for model in models],
+               loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=len(models), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    save(fig, named_stem(args.output_dir, f"selection_bars_{args.scope}{'_sd' if args.error_bars else ''}", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "selection_bar_summary.csv", records)
     write_csv(args.output_dir / "selection_plot_data.csv", selections)
 
@@ -451,13 +478,12 @@ def pearson(points: list[dict], key: str) -> float | None:
 
 
 def scatter(args, predictions, keys):
-    models = list(dict.fromkeys(p["model"] for p in predictions))
+    models = ordered_models(list(dict.fromkeys(p["model"] for p in predictions)), set(args.steering))
     if len(models) > 2:
         raise ValueError("Scatter supports one or two models per figure")
     grouped = groups_by_input(predictions)
-    fig, axes = panels(keys, f"Chirality accuracy versus structure · {args.selection}")
-    fig._suptitle.set_y(1.075)
-    plot_rows, pair_rows = [], []
+    fig, axes = panels(keys, f"D-Cα chirality correctness versus structure · {args.selection}", discussion_title=args.discussion_title)
+    plot_rows, pair_rows, unmatched_rows = [], [], []
     for key in keys:
         ax = axes[key]
         selected = []
@@ -465,62 +491,79 @@ def scatter(args, predictions, keys):
             selected = [p for p in predictions if p[key] is not None and p["chirality"] is not None]
         else:
             for candidates in grouped.values():
-                item = choose(candidates, args.selection, key)
+                selection_metric = args.oracle_target if args.selection == "oracle" and args.oracle_target else key
+                item = choose(candidates, args.selection, selection_metric)
                 if item[key] is not None and item["chirality"] is not None:
                     selected.append(item)
+        paired = {}
+        if len(models) == 2:
+            pair_key = (lambda p: (p["sample_id"], p["seed"])) if args.selection == "all" else (lambda p: (p["sample_id"],))
+            sides = [defaultdict(list) for _ in models]
+            for p in selected:
+                sides[models.index(p["model"])][pair_key(p)].append(p)
+            common = sides[0].keys() & sides[1].keys()
+            for p in selected:
+                if pair_key(p) not in common:
+                    unmatched_rows.append({"metric": key, "model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"], "reason": "no matched counterpart"})
+            selected = [p for p in selected if pair_key(p) in common]
+            for pair_id in sorted(common):
+                if len(sides[0][pair_id]) != 1 or len(sides[1][pair_id]) != 1:
+                    raise ValueError(f"Ambiguous paired predictions for {pair_id}; choose one structure per input and seed")
+                paired[pair_id] = (sides[0][pair_id][0], sides[1][pair_id][0])
         if not selected:
             ax.set_visible(False)
             continue
         for model in models:
             subset = [p for p in selected if p["model"] == model]
-            ax.scatter([p["chirality"] for p in subset], [p[key] for p in subset], label=model,
-                       color=method_color(model, set(args.steering)), alpha=0.75, s=35 if model == models[0] else 43,
-                       marker="o" if model == models[0] else "^", zorder=3)
+            ax.scatter([p["chirality"] for p in subset], [p[key] for p in subset], label=display_name(model, set(args.steering)),
+                       color=method_color(model, set(args.steering), models), alpha=0.85, s=12.25,
+                       marker=model_marker(model), zorder=3)
             r = pearson(subset, key)
             if r is not None:
-                ax.text(0.98, 0.98 - models.index(model) * 0.07, f"{model}: r={r:.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=8)
+                ax.text(0.98, 0.98 - models.index(model) * 0.07, f"{display_name(model, set(args.steering))}: r={r:.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=8)
         if len(models) == 2:
-            pair_keys = (lambda p: (p["sample_id"], p["seed"])) if args.selection == "all" else (lambda p: (p["sample_id"],))
-            sides = [defaultdict(list) for _ in models]
-            for p in selected:
-                sides[models.index(p["model"])][pair_keys(p)].append(p)
-            for pair_id in sorted(sides[0].keys() & sides[1].keys()):
-                if len(sides[0][pair_id]) != 1 or len(sides[1][pair_id]) != 1:
-                    raise ValueError(f"Ambiguous paired predictions for {pair_id}; choose one structure per input and seed")
-                a, b = sides[0][pair_id][0], sides[1][pair_id][0]
-                ax.plot([a["chirality"], b["chirality"]], [a[key], b[key]], linestyle=":", color="#64748B", alpha=0.47, zorder=2)
+            for pair_id, (a, b) in paired.items():
+                ax.plot([a["chirality"], b["chirality"]], [a[key], b[key]], linestyle=":", color=PAIR_LINE, linewidth=0.6, zorder=2)
                 pair_rows.append({"metric": key, "sample_id": a["sample_id"], "seed_1": a["seed"], "seed_2": b["seed"], "model_1": models[0], "model_2": models[1], "value_1": a[key], "value_2": b[key]})
         for p in selected:
-            plot_rows.append({"metric": key, "model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"], "selection": args.selection, "prediction_path": p["prediction_path"], "chirality_accuracy_pct": p["chirality"], "metric_value": p[key]})
+            plot_rows.append({"metric": key, "model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"], "selection": args.selection, "selection_metric": args.oracle_target if args.selection == "oracle" and args.oracle_target else key, "prediction_path": p["prediction_path"], "d_ca_chirality_correctness_pct": p["chirality"], "metric_value": p[key]})
         ax.set_xlim(-2, 102)
-        ax.set_xlabel("Chirality accuracy (%)")
-        ax.set_ylabel(BY_KEY[key].unit)
-        ax.set_title(BY_KEY[key].title, loc="left", fontsize=10, weight="bold")
-        ax.grid(color="#E2E8F0", linewidth=0.7, zorder=0)
+        ax.set_xlabel("D-Cα chirality correctness (%)")
+        ax.set_ylabel(label_metric(BY_KEY[key].label, BY_KEY[key].unit))
+        ax.set_title(panel_title(BY_KEY[key].label, BY_KEY[key].higher), loc="left", fontsize=9, weight="bold")
         if key in {"lddt", "ilddt", "dockq"}:
             ax.set_ylim(-0.02, 1.02)
         elif key == "chirality":
             ax.set_ylim(-2, 102)
         else:
-            ax.set_yscale("symlog", linthresh=2)
             ax.set_ylim(bottom=0)
-    handles = [Line2D([0], [0], marker="o" if i == 0 else "^", linestyle="", color=method_color(model, set(args.steering)), label=model) for i, model in enumerate(models)]
-    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 1.035), ncol=len(models), frameon=False)
-    fig.tight_layout(rect=(0, 0, 1, 0.965))
-    save(fig, args.output_dir / f"chirality_scatter_{args.selection}", args.formats)
+    handles = [Line2D([0], [0], marker=model_marker(model), linestyle="", color=method_color(model, set(args.steering), models), label=display_name(model, set(args.steering))) for model in models]
+    if not plot_rows:
+        raise ValueError("No matched observations with both D-Cα correctness and selected metrics")
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=len(models), frameon=False)
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    save(fig, named_stem(args.output_dir, f"chirality_scatter_{args.selection}", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "scatter_plot_data.csv", plot_rows)
     write_csv(args.output_dir / "scatter_pairs.csv", pair_rows)
+    write_csv(args.output_dir / "scatter_unmatched.csv", unmatched_rows,
+              ["metric", "model", "sample_id", "seed", "reason"])
 
 
 def seed_range(args, predictions, keys):
-    models = list(dict.fromkeys(p["model"] for p in predictions))
+    models = ordered_models(list(dict.fromkeys(p["model"] for p in predictions)), set(args.steering))
     if len(models) != 2:
         raise ValueError("Seed range requires exactly two sources")
     grouped = groups_by_input(predictions)
-    ids = sorted({p["sample_id"] for p in predictions})
+    ids_by_model = {model: {p["sample_id"] for p in predictions if p["model"] == model} for model in models}
+    ids = sorted(ids_by_model[models[0]] & ids_by_model[models[1]])
+    if not ids:
+        raise ValueError("Seed range requires inputs evaluated by both models")
+    unmatched = [{"model": model, "sample_id": sample_id, "reason": "no matched input in other model"}
+                 for model in models for sample_id in sorted(ids_by_model[model] - set(ids))]
+    write_csv(args.output_dir / "seed_range_unmatched.csv", unmatched, ["model", "sample_id", "reason"])
     rows = []
     for key in keys:
-        fig, ax = plt.subplots(figsize=(12, max(5, len(ids) * 0.45 + 1.5)))
+        fig, ax = plt.subplots(figsize=(DOUBLE_WIDTH, max(SINGLE_WIDTH, len(ids) * 0.19 + 1.0)))
         for i, sample_id in enumerate(ids):
             for j, model in enumerate(models):
                 points = [p for p in grouped.get((model, sample_id), []) if p[key] is not None]
@@ -530,19 +573,18 @@ def seed_range(args, predictions, keys):
                     raise ValueError(f"Multiple predictions for a seed of {sample_id} {model}; select one structure per seed")
                 y = i + (-0.16 if j == 0 else 0.16)
                 values = [p[key] for p in points]
-                color = method_color(model, set(args.steering))
-                ax.plot([min(values), max(values)], [y, y], color=color, linewidth=2.5, zorder=2)
-                ax.scatter(values, [y] * len(values), color=color, s=25, alpha=0.8, zorder=3)
+                color = method_color(model, set(args.steering), models)
+                ax.plot([min(values), max(values)], [y, y], color=color, linewidth=1, zorder=2)
+                ax.scatter(values, [y] * len(values), color=color, s=12.25, alpha=0.85, marker=model_marker(model), zorder=3)
                 for p in points:
                     rows.append({"metric": key, "model": model, "sample_id": sample_id, "seed": p["seed"], "value": p[key], "min": min(values), "max": max(values), "prediction_path": p["prediction_path"]})
         ax.set_yticks(range(len(ids)), ids)
         ax.invert_yaxis()
-        ax.set_xlabel(f"{BY_KEY[key].label} ({BY_KEY[key].unit})")
-        ax.set_title(BY_KEY[key].title, loc="left", fontsize=12, weight="bold")
-        ax.grid(axis="x", color="#E2E8F0")
-        ax.legend(handles=[Line2D([0], [0], marker="o", color=method_color(model, set(args.steering)), label=model) for model in models], loc="upper right")
+        ax.set_xlabel(label_metric(BY_KEY[key].label, BY_KEY[key].unit))
+        ax.set_title(panel_title(BY_KEY[key].label, BY_KEY[key].higher), loc="left", fontsize=9, weight="bold")
+        ax.legend(handles=[Line2D([0], [0], marker=model_marker(model), color=method_color(model, set(args.steering), models), label=display_name(model, set(args.steering))) for model in models], loc="upper right", frameon=False)
         fig.tight_layout()
-        save(fig, args.output_dir / f"{key}_seed_minmax", args.formats)
+        save(fig, named_stem(args.output_dir, f"{key}_seed_minmax", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "seed_range_plot_data.csv", rows)
 
 
@@ -550,11 +592,15 @@ def distribution(args, predictions, keys):
     models = list(dict.fromkeys(p["model"] for p in predictions))
     if len(models) != 2:
         raise ValueError("Distribution requires baseline and steering sources")
+    if model_identity(models[0], set(args.steering))[1] != "baseline" or model_identity(models[1], set(args.steering))[1] != "steering":
+        raise ValueError("Distribution sources must be baseline first and steering second; label models accordingly")
     baseline = [p for p in predictions if p["model"] == models[0] and p["sample_id"] == args.input_id]
     steering = [p for p in predictions if p["model"] == models[1] and p["sample_id"] == args.input_id]
     if len(baseline) < 2 or not steering:
         raise ValueError("Distribution needs at least two baseline seeds and one steering prediction for the input")
-    fig, axes = panels(keys, f"{args.input_id}: {len(baseline)} unsteered seeds versus {len(steering)} steering predictions")
+    fig, axes = panels(keys, f"{args.input_id}: {len(baseline)} unsteered seeds versus {len(steering)} steering predictions", discussion_title=args.discussion_title)
+    base_color = method_color(models[0], set(args.steering), models)
+    steering_color = method_color(models[1], set(args.steering), models)
     rows = []
     for key in keys:
         ax = axes[key]
@@ -563,15 +609,15 @@ def distribution(args, predictions, keys):
         vals = [p[key] for p in base]
         violin = ax.violinplot(vals, positions=[0], widths=0.6, showextrema=False)
         for body in violin["bodies"]:
-            body.set_facecolor(BLUE)
+            body.set_facecolor(base_color)
             body.set_alpha(0.25)
         ax.boxplot(vals, positions=[0], widths=0.17, showfliers=False, patch_artist=True,
-                   boxprops={"facecolor": "white", "edgecolor": BLUE}, medianprops={"color": BLUE})
-        ax.scatter([((i % 7) - 3) * 0.035 for i in range(len(vals))], vals, s=13, color=BLUE, alpha=0.52, zorder=3)
-        ax.scatter([1 + (i - (len(steer) - 1) / 2) * 0.06 for i in range(len(steer))], [p[key] for p in steer], s=55, color=ORANGE, marker="D", zorder=4)
+                   boxprops={"facecolor": "white", "edgecolor": base_color}, medianprops={"color": INK})
+        ax.scatter([((i % 7) - 3) * 0.035 for i in range(len(vals))], vals, s=12.25, color=base_color, alpha=0.85, marker=model_marker(models[0]), zorder=3)
+        ax.scatter([1 + (i - (len(steer) - 1) / 2) * 0.06 for i in range(len(steer))], [p[key] for p in steer], s=12.25, color=steering_color, alpha=0.85, marker=model_marker(models[1]), zorder=4)
         for p in base + steer:
             rows.append({"metric": key, "model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"], "value": p[key], "prediction_path": p["prediction_path"]})
-        ax.set_xticks([0, 1], [f"{models[0]}\n(n={len(base)})", f"{models[1]}\n(n={len(steer)})"])
+        ax.set_xticks([0, 1], [f"{display_name(models[0], set(args.steering))}\n(n={len(base)})", f"{display_name(models[1], set(args.steering))}\n(n={len(steer)})"])
         ax.set_xlim(-0.5, 1.45)
         metric_axis(ax, BY_KEY[key])
         observed = vals + [p[key] for p in steer]
@@ -580,7 +626,7 @@ def distribution(args, predictions, keys):
         cap = 103 if key == "chirality" else (1.02 if key in {"lddt", "ilddt", "dockq"} else float("inf"))
         ax.set_ylim(max(0, low - 0.14 * span), min(cap, high + 0.14 * span))
     fig.tight_layout()
-    save(fig, args.output_dir / f"{args.input_id}_metric_distributions", args.formats)
+    save(fig, named_stem(args.output_dir, f"{args.input_id}_metric_distributions", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "distribution_plot_data.csv", rows)
 
 
@@ -592,18 +638,22 @@ def main():
         p.add_argument("--source", action="append", required=True, help="MODEL=CSV or MODEL=CSV::PATH_METHOD; repeat per model")
         p.add_argument("--output-dir", type=Path, required=True)
         p.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated output formats: svg,png,pdf (default: svg)")
+        p.add_argument("--figure-id", help="Final manuscript figure number, e.g. Fig05 (adds figure/content/version filename)")
+        p.add_argument("--version", default="v01", help="Final manuscript figure version (default: v01)")
+        p.add_argument("--discussion-title", action="store_true", help="Add an 11 pt whole-figure title for standalone discussion figures")
         p.add_argument("--metrics", help=f"Comma-separated keys; default all: {','.join(BY_KEY)}")
         p.add_argument("--steering", action="append", default=[], help="Model label to color orange; repeat as needed")
         p.add_argument("--seed-regex", help="Regex with one capture group for seed ID")
         p.add_argument("--confidence-csv", type=Path, help="CSV: prediction_path,confidence_score")
         p.add_argument("--confidence-root", type=Path, help="Evaluation directory containing adjacent Boltz confidence_<structure>.json files")
+        if name in {"compare", "selection-bars", "scatter"}:
+            p.add_argument("--oracle-target", choices=tuple(BY_KEY), help="Use one oracle selection metric across panels; default metric-specific oracle")
         if name in {"compare", "distribution"}:
             p.add_argument("--input-id", required=True)
         if name == "compare":
             p.add_argument("--selection", choices=("single", "top1", "oracle"), default="single")
         if name == "selection-bars":
             p.add_argument("--scope", choices=("common", "all"), default="common")
-            p.add_argument("--oracle-target", choices=tuple(BY_KEY), help="Use one oracle metric across all panels; default metric-specific")
             p.add_argument("--error-bars", action="store_true", help="Show sample SD across inputs")
         if name == "scatter":
             p.add_argument("--selection", choices=("all", "top1", "oracle"), default="all")
@@ -615,20 +665,54 @@ def main():
     if args.command == "scatter" and not args.metrics:
         keys.remove("chirality")
     describe_points(predictions, keys, args.output_dir)
+    describe_skipped(args.source, args.output_dir)
     {"compare": compare, "selection-bars": selection_bars, "scatter": scatter,
      "seed-range": seed_range, "distribution": distribution}[args.command](args, predictions, keys)
     manifest = {
         "command": args.command,
+        "formatting_standard": SOURCE_URL,
         "sources": args.source,
         "metric_keys": keys,
         "prediction_count": len(predictions),
         "predictions_by_model": {model: sum(p["model"] == model for p in predictions)
                                  for model in dict.fromkeys(p["model"] for p in predictions)},
         "missing_values_by_metric": {key: sum(p[key] is None for p in predictions) for key in keys},
+        "observation_unit": {"compare": "one selected prediction per system/model/metric",
+                             "selection-bars": "one selected prediction per system/model/selection/metric",
+                             "scatter": "system-seed pair" if getattr(args, "selection", None) == "all" else "one selected prediction per system/model/metric",
+                             "seed-range": "system-seed pair", "distribution": "seed of one system"}[args.command],
         "settings": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
                      if k not in {"source", "output_dir"}},
     }
     (args.output_dir / "plot_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    model_ids = {model: {p["sample_id"] for p in predictions if p["model"] == model}
+                 for model in manifest["predictions_by_model"]}
+    matched = len(set.intersection(*model_ids.values())) if model_ids else 0
+    selection = getattr(args, "selection", "top-1 versus metric-wise oracle" if args.command == "selection-bars" else "all evaluated seeds")
+    if getattr(args, "oracle_target", None):
+        oracle_note = f"Shared {args.oracle_target} oracle across panels"
+    elif args.command == "selection-bars" or selection == "oracle":
+        oracle_note = "Metric-wise oracle panels select independently; they are not a joint profile from one structure"
+    else:
+        oracle_note = "Each plotted multi-metric observation uses values from its stated prediction file"
+    top1_note = " Top-1 means highest supplied confidence score." if args.command == "selection-bars" or selection == "top1" else ""
+    caption = (
+        f"# Caption draft — complete and verify before manuscript use\n\n"
+        f"Figure {args.figure_id[3:] if args.figure_id else 'X'}. [Main finding or comparison].\n"
+        f"Panels: {', '.join(BY_KEY[key].label for key in keys)}. "
+        f"Observation unit: {manifest['observation_unit']}. "
+        f"Input IDs present in every model before metric-specific exclusions: {matched}. "
+        f"Selection: {selection}.{top1_note} {oracle_note}.\n\n"
+        "[Verify source metric definitions, N/Cα/C/O alignment atoms, chain mappings, "
+        "DockQ mode/interface scope, and lDDT implementation before stating them.] "
+        "D-Cα correctness uses correct/target D-site counts; unassessable target sites remain in the denominator. "
+        "Missing metrics are NA in normalized_predictions.csv with reasons in missing_values.csv; "
+        "skipped evaluations are in skipped_predictions.csv. "
+        + ("Error bars show sample SD across selected system-level values. " if getattr(args, "error_bars", False) else "")
+        + "[State metric-specific matched N, seeds per system, "
+        "and any evaluation restrictions. For boxplots: median, IQR, 1.5×IQR whiskers, all raw points.]\n"
+    )
+    (args.output_dir / "caption_draft.md").write_text(caption, encoding="utf-8")
     print(f"Wrote {args.command} plots for {len(predictions)} predictions to {args.output_dir}")
 
 

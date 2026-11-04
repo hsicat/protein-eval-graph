@@ -17,10 +17,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import yaml
 from plot_metrics import parse_formats
+from rcg_style import CONDITION_COLORS, DOUBLE_WIDTH, letter_panels, named_stem, save_figure, setup_style
 
 
 D_CCD = frozenset("DAL DAR DAS DCY DGL DGN DHI DIL DLE DLY DPN DPR DSG DSN DTH DTR DTY DVA MED".split())
-BLUE = "#2563A6"
+BLUE = CONDITION_COLORS["baseline"]
 
 
 def load_file(path: Path) -> dict:
@@ -114,29 +115,27 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
         writer.writerows(rows)
 
 
-def plot(samples: list[dict], outdir: Path, formats: tuple[str, ...] = ("svg",)) -> None:
+def plot(samples: list[dict], outdir: Path, formats: tuple[str, ...] = ("svg",),
+         figure_id: str | None = None, version: str = "v01") -> None:
     ordered = sorted(samples, key=lambda r: (-r["d_fraction"], -r["d_residues"], r["sample_id"]))
     labels = [r["sample_id"] for r in ordered]
     ys = list(range(len(ordered)))
-    fig, (left, right) = plt.subplots(1, 2, figsize=(14, max(5, len(ordered) * 0.38 + 1.5)), sharey=True)
+    fig, (left, right) = plt.subplots(1, 2, figsize=(DOUBLE_WIDTH, max(3.6, len(ordered) * 0.18 + 0.7)), sharey=True)
     left.barh(ys, [r["d_residues"] for r in ordered], color=BLUE, height=0.72)
     right.barh(ys, [r["d_percent"] for r in ordered], color=BLUE, height=0.72)
     left.set_yticks(ys, labels)
     left.invert_yaxis()
-    left.set_xlabel("Number of D residues")
-    right.set_xlabel("D residues / residues in D-containing chains (%)")
-    left.set_title("D-residue count", loc="left", weight="bold")
-    right.set_title("D-residue fraction", loc="left", weight="bold")
-    right.set_xlim(0, 105)
+    left.set_xlabel("D-amino-acid residues (count)")
+    right.set_xlabel("D residues in D-containing chains (%)")
+    left.set_title("D-residue count", loc="left", weight="bold", fontsize=9)
+    right.set_title("D-residue fraction", loc="left", weight="bold", fontsize=9)
+    right.set_xlim(0, 101)
     for ax in (left, right):
-        ax.grid(axis="x", color="#E2E8F0", zorder=0)
         ax.set_axisbelow(True)
         ax.spines[["top", "right"]].set_visible(False)
-    fig.suptitle("D-amino-acid composition by input", weight="bold", y=1.015)
-    fig.tight_layout(rect=(0, 0, 1, 0.985))
-    for ext in formats:
-        fig.savefig(outdir / f"daa_composition.{ext}", dpi=220, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    letter_panels([left, right])
+    fig.tight_layout()
+    save_figure(fig, named_stem(outdir, "daa_composition", figure_id, version), formats)
 
 
 def main() -> None:
@@ -145,13 +144,23 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--glob", default="auto", help="Recursive file pattern, or auto (prefer compact *_ccd.yaml files)")
     parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated output formats: svg,png,pdf (default: svg)")
+    parser.add_argument("--figure-id", help="Final manuscript figure number, e.g. Fig05")
+    parser.add_argument("--version", default="v01", help="Final manuscript version (default: v01)")
     args = parser.parse_args()
+    setup_style()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     samples, chains, without_d = extract(args.inputs, args.glob)
     write_csv(args.output_dir / "sample_summary.csv", samples, list(samples[0]))
     write_csv(args.output_dir / "chain_details.csv", chains, list(chains[0]))
     write_csv(args.output_dir / "inputs_without_d_residues.csv", [{"sample_id": s} for s in without_d], ["sample_id"])
-    plot(samples, args.output_dir, args.formats)
+    plot(samples, args.output_dir, args.formats, args.figure_id, args.version)
+    (args.output_dir / "caption_draft.md").write_text(
+        f"# Caption draft — complete before manuscript use\n\nFigure {args.figure_id[3:] if args.figure_id else 'X'}. "
+        f"D-amino-acid composition of {len(samples)} inputs. Each row is one input. "
+        "Count is the number of D-residue modifications across all physical D-containing protein chains; "
+        "fraction uses the full lengths of those chains only. "
+        f"Inputs without a D-containing chain: {len(without_d)} (listed in inputs_without_d_residues.csv). "
+        "[State the input selection and modification-code provenance.]\n", encoding="utf-8")
     print(f"Plotted {len(samples)} inputs; {len(without_d)} inputs had no D-containing chain")
 
 
