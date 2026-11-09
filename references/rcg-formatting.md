@@ -1,6 +1,6 @@
 # RCG paper figure rules
 
-This is the operational English guide for the user's Notion page “RCG Paper Figure/Table Formatting”, fetched 2026-11-04. The [source snapshot](rcg-notion-source.md) preserves its text, omitting a private image reference and local script path. Recheck the Notion page when available; the page supersedes this copy if revised. These are manuscript working rules, subject to the target journal's final requirements. Apply them to main and supplementary figures.
+This is the bundled operational English guide for the user's Notion page “RCG Paper Figure/Table Formatting”, fetched 2026-11-04 and verified against the unchanged page on 2026-11-09. The [source snapshot](rcg-notion-source.md) preserves its text, omitting a private image reference and local script path. This local guide and snapshot are the formatting authority during plot generation; no Notion access is needed. Refresh them only when the user explicitly requests synchronization. These are manuscript working rules, subject to the target journal's final requirements. Apply them to main and supplementary figures.
 
 ## Group names, colors, and order
 

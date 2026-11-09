@@ -1,7 +1,7 @@
 # RCG Paper Figure/Table Formatting — source snapshot
 
 Source: User's Notion page “RCG Paper Figure/Table Formatting”.
-Retrieved: 2026-11-04. The Notion page remains authoritative if this copy becomes outdated.
+Retrieved: 2026-11-04. Verified unchanged: 2026-11-09. Use this bundled copy for plot generation. Refresh it from Notion only when the user explicitly requests synchronization.
 
 # RCG manuscript — 作图规范 v1.1（整合工作版）
 

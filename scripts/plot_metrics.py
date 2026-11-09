@@ -62,6 +62,25 @@ BY_KEY = {m.key: m for m in METRICS}
 PREDICTION_FIELDS = {m.column for m in METRICS if m.key not in {"binder", "placed", "irmsd"}}
 
 
+def metric_label_for_plot(args: argparse.Namespace, key: str) -> str:
+    """Allow source-accurate lDDT wording without forking the plotter."""
+    if key == "lddt" and args.lddt_label:
+        return args.lddt_label
+    if key == "ilddt" and args.ilddt_label:
+        return args.ilddt_label
+    return BY_KEY[key].label
+
+
+def scatter_stat_name(model: str, models: list[str], steering_names: set[str]) -> str:
+    """Use condition names in paired same-model panels; the legend has full names."""
+    bases = {model_identity(name, steering_names)[0] for name in models}
+    if len(models) == 2 and len(bases) == 1 and None not in bases:
+        condition = model_identity(model, steering_names)[1]
+        return {"baseline": "Baseline", "steering": "+ steering",
+                "rcg": "+ RCG", "rcg_steering": "+ RCG + steering"}[condition]
+    return display_name(model, steering_names)
+
+
 def number(value: object) -> float | None:
     try:
         result = float(value)
@@ -125,7 +144,7 @@ def read_confidence(path: Path | None) -> dict[str, float]:
 
 
 def load_predictions(source_specs: list[str], seed_regex: str | None, confidence_csv: Path | None,
-                     confidence_root: Path | None = None) -> list[dict]:
+                     confidence_root: Path | None = None, allow_single_method_seed_layout: bool = False) -> list[dict]:
     confidence = read_confidence(confidence_csv)
     seen_models = set()
     predictions = []
@@ -140,7 +159,7 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
             raise ValueError(f"{path}: missing sample_id, prediction_path, or status")
         if method_filter is None:
             path_methods = {path_method(row["prediction_path"]) for row in rows}
-            if len(path_methods) > 1 and not all(
+            if len(path_methods) > 1 and not allow_single_method_seed_layout and not all(
                 token and (re.fullmatch(r"seed\d+", token, re.I) or re.fullmatch(r".+_\d{2,5}", token))
                 for token in path_methods
             ):
@@ -158,9 +177,17 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
             first = group[0]
             if len({r["sample_id"] for r in group}) != 1:
                 raise ValueError(f"Conflicting sample IDs for {pred_path}")
+            seed = seed_from_path(pred_path, seed_regex)
+            if seed == "single" and allow_single_method_seed_layout:
+                source_paths = {r.get("summary_path", "") for r in group}
+                if len(source_paths) != 1 or not next(iter(source_paths)):
+                    raise ValueError(f"Cannot recover seed from unique summary_path for {pred_path}")
+                seed = seed_from_path(next(iter(source_paths)), seed_regex)
+                if seed == "single":
+                    raise ValueError(f"No seed in prediction_path or summary_path for {pred_path}")
             item = {
                 "model": model, "sample_id": first["sample_id"],
-                "prediction_path": pred_path, "seed": seed_from_path(pred_path, seed_regex),
+                "prediction_path": pred_path, "seed": seed,
                 "status": first["status"], "binder_groups": len(group),
                 "warnings": first.get("warnings", ""),
                 "unavailable_metrics_json": first.get("unavailable_metrics_json", ""),
@@ -483,7 +510,11 @@ def scatter(args, predictions, keys):
         raise ValueError("Scatter supports one or two models per figure")
     grouped = groups_by_input(predictions)
     fig, axes = panels(keys, f"D-Cα chirality correctness versus structure · {args.selection}", discussion_title=args.discussion_title)
+    # Reserve a separate band for correlations above each plotting area.
+    fig.set_size_inches(DOUBLE_WIDTH if len(keys) > 1 else SINGLE_WIDTH,
+                        6.4 if len(keys) > 1 else 4.1)
     plot_rows, pair_rows, unmatched_rows = [], [], []
+    stat_artists = []
     for key in keys:
         ax = axes[key]
         selected = []
@@ -513,6 +544,7 @@ def scatter(args, predictions, keys):
         if not selected:
             ax.set_visible(False)
             continue
+        correlations = []
         for model in models:
             subset = [p for p in selected if p["model"] == model]
             ax.scatter([p["chirality"] for p in subset], [p[key] for p in subset], label=display_name(model, set(args.steering)),
@@ -520,7 +552,9 @@ def scatter(args, predictions, keys):
                        marker=model_marker(model), zorder=3)
             r = pearson(subset, key)
             if r is not None:
-                ax.text(0.98, 0.98 - models.index(model) * 0.07, f"{display_name(model, set(args.steering))}: r={r:.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=8)
+                correlations.append(f"{scatter_stat_name(model, models, set(args.steering))}: r={r:.2f}")
+            else:
+                correlations.append(f"{scatter_stat_name(model, models, set(args.steering))}: r=NA")
         if len(models) == 2:
             for pair_id, (a, b) in paired.items():
                 ax.plot([a["chirality"], b["chirality"]], [a[key], b[key]], linestyle=":", color=PAIR_LINE, linewidth=0.6, zorder=2)
@@ -529,8 +563,15 @@ def scatter(args, predictions, keys):
             plot_rows.append({"metric": key, "model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"], "selection": args.selection, "selection_metric": args.oracle_target if args.selection == "oracle" and args.oracle_target else key, "prediction_path": p["prediction_path"], "d_ca_chirality_correctness_pct": p["chirality"], "metric_value": p[key]})
         ax.set_xlim(-2, 102)
         ax.set_xlabel("D-Cα chirality correctness (%)")
-        ax.set_ylabel(label_metric(BY_KEY[key].label, BY_KEY[key].unit))
-        ax.set_title(panel_title(BY_KEY[key].label, BY_KEY[key].higher), loc="left", fontsize=9, weight="bold")
+        label = metric_label_for_plot(args, key)
+        ax.set_ylabel(label_metric(label, BY_KEY[key].unit))
+        title = ax.set_title(panel_title(label, BY_KEY[key].higher),
+                             loc="left", fontsize=9, weight="bold", pad=31)
+        if correlations:
+            stat = ax.text(0.5, 1.035, "\n".join(correlations),
+                           transform=ax.transAxes, ha="center", va="bottom",
+                           fontsize=8, clip_on=False)
+            stat_artists.append((ax, stat, title))
         if key in {"lddt", "ilddt", "dockq"}:
             ax.set_ylim(-0.02, 1.02)
         elif key == "chirality":
@@ -542,6 +583,19 @@ def scatter(args, predictions, keys):
         raise ValueError("No matched observations with both D-Cα correctness and selected metrics")
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.01), ncol=len(models), frameon=False)
     fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    stat_boxes = [stat.get_window_extent(renderer) for _, stat, _ in stat_artists]
+    title_boxes = [title.get_window_extent(renderer) for _, _, title in stat_artists]
+    for index, (ax, stat, title) in enumerate(stat_artists):
+        bbox = stat_boxes[index]
+        if (not fig.bbox.contains(*bbox.p0) or not fig.bbox.contains(*bbox.p1)
+                or any(bbox.overlaps(other) for other in title_boxes)
+                or any(bbox.overlaps(other) for other_index, other in enumerate(stat_boxes)
+                       if other_index != index)
+                or any(bbox.overlaps(other.bbox) for other in axes.values()
+                       if other.get_visible())):
+            raise RuntimeError("Scatter correlation text overlaps another label or plotting area; increase layout spacing")
     save(fig, named_stem(args.output_dir, f"chirality_scatter_{args.selection}", args.figure_id, args.version), args.formats)
     write_csv(args.output_dir / "scatter_plot_data.csv", plot_rows)
     write_csv(args.output_dir / "scatter_pairs.csv", pair_rows)
@@ -642,8 +696,12 @@ def main():
         p.add_argument("--version", default="v01", help="Final manuscript figure version (default: v01)")
         p.add_argument("--discussion-title", action="store_true", help="Add an 11 pt whole-figure title for standalone discussion figures")
         p.add_argument("--metrics", help=f"Comma-separated keys; default all: {','.join(BY_KEY)}")
+        p.add_argument("--lddt-label", help="Source-accurate global lDDT label for scatter titles and axes")
+        p.add_argument("--ilddt-label", help="Source-accurate interface lDDT label for scatter titles and axes")
         p.add_argument("--steering", action="append", default=[], help="Model label to color orange; repeat as needed")
         p.add_argument("--seed-regex", help="Regex with one capture group for seed ID")
+        p.add_argument("--allow-single-method-seed-layout", action="store_true",
+                       help="Treat a source CSV as one method despite seed directories or legacy path aliases; recover missing seed IDs from summary_path")
         p.add_argument("--confidence-csv", type=Path, help="CSV: prediction_path,confidence_score")
         p.add_argument("--confidence-root", type=Path, help="Evaluation directory containing adjacent Boltz confidence_<structure>.json files")
         if name in {"compare", "selection-bars", "scatter"}:
@@ -660,7 +718,7 @@ def main():
     args = parser.parse_args()
     setup_style()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    predictions = load_predictions(args.source, args.seed_regex, args.confidence_csv, args.confidence_root)
+    predictions = load_predictions(args.source, args.seed_regex, args.confidence_csv, args.confidence_root, args.allow_single_method_seed_layout)
     keys = selected_metric_keys(args, predictions)
     if args.command == "scatter" and not args.metrics:
         keys.remove("chirality")
@@ -699,7 +757,7 @@ def main():
     caption = (
         f"# Caption draft — complete and verify before manuscript use\n\n"
         f"Figure {args.figure_id[3:] if args.figure_id else 'X'}. [Main finding or comparison].\n"
-        f"Panels: {', '.join(BY_KEY[key].label for key in keys)}. "
+        f"Panels: {', '.join(metric_label_for_plot(args, key) for key in keys)}. "
         f"Observation unit: {manifest['observation_unit']}. "
         f"Input IDs present in every model before metric-specific exclusions: {matched}. "
         f"Selection: {selection}.{top1_note} {oracle_note}.\n\n"

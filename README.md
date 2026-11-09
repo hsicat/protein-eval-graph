@@ -2,7 +2,7 @@
 
 A reusable Codex skill and command-line plotting tools for protein prediction evaluations. It draws figures from existing `protein-eval-skill` `batch_summary.csv` files, D-amino-acid input files, and native/predicted structures. The scripts generate plots and plot-data CSVs; they do not evaluate structures.
 
-The skill follows the user's Notion page “RCG Paper Figure/Table Formatting”. See the [operational formatting guide](references/rcg-formatting.md) and [source snapshot](references/rcg-notion-source.md). The live Notion page takes precedence if revised.
+The skill follows a bundled copy of the user's “RCG Paper Figure/Table Formatting” rules. See the [operational formatting guide](references/rcg-formatting.md) and [source snapshot](references/rcg-notion-source.md). Plot generation uses these local files and does not require a Notion connection. Refresh the copy only when the user explicitly requests synchronization with the Notion page.
 
 ## Install
 
@@ -157,3 +157,5 @@ Pass the confirmed chain ID for each structure. The script exports the native an
 Keep the source CSVs, selected `--source` filters, confidence scores, script command, and exported plot-data CSV with each figure. Do not infer a model's seed ranking from evaluation metrics. The graph scripts do not change the source data. Their selection and aggregation rules are documented in [references/graph-types.md](references/graph-types.md).
 
 For manuscript delivery, verify that each input metric matches the [RCG definitions](references/rcg-formatting.md), complete the generated `caption_draft.md`, and use `--figure-id Fig05 --version v01` to name figures with number, content, and version (for example, `Fig05_DockQ_oracle_v01.svg`). The default SVG uses editable Arial text at the final 90/180 mm size; the viewer needs Arial installed. The system Arial fonts on this workstation restrict embedding, so check the receiving journal's font requirement before submission. Use `--discussion-title` to add the optional 11 pt whole-figure title to `plot_metrics.py` and `plot_daa_groups.py` outputs; manuscript figures omit that title by default.
+
+For a verified one-method CSV organized by `seedN/` with legacy model-path aliases, pass `--allow-single-method-seed-layout`. It retains original prediction paths and recovers a missing seed ID from that row’s saved summary path.
