@@ -9,20 +9,20 @@ import statistics as stats
 from collections import defaultdict
 from pathlib import Path
 
-from plot_metrics import BY_KEY as BASE_METRICS, Metric, load_predictions, method_color, panels, parse_formats, save, setup_style, write_csv
+from plot_metrics import BY_KEY as BASE_METRICS, Metric, load_predictions, method_color, ordered_panel_keys, panels, parse_formats, save, setup_style, write_csv
 from matplotlib.patches import Patch
 from rcg_style import INK, display_name, model_marker, named_stem, ordered_models, panel_title
 
 
 GROUP_ORDER = ("Single D", "Partial D", "All D")
 METRICS = (
+    Metric("daa_chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
     BASE_METRICS["target"],
     BASE_METRICS["binder"],
     BASE_METRICS["lddt"],
-    Metric("daa_chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
+    BASE_METRICS["placed"],
     BASE_METRICS["ilddt"],
     BASE_METRICS["dockq"],
-    BASE_METRICS["placed"],
 )
 BY_KEY = {metric.key: metric for metric in METRICS}
 
@@ -208,6 +208,7 @@ def main() -> None:
     keys = [part.strip() for part in args.metrics.split(",")] if args.metrics else list(BY_KEY)
     if not keys or len(keys) != len(set(keys)) or any(key not in BY_KEY for key in keys):
         parser.error(f"--metrics must contain unique keys from {','.join(BY_KEY)}")
+    keys = ordered_panel_keys(keys, BY_KEY)
     setup_style()
     groups = read_groups(args.chain_details)
     predictions = load_predictions(args.source, args.seed_regex, None)

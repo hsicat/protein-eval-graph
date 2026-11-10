@@ -49,13 +49,13 @@ class Metric:
 
 
 METRICS = (
+    Metric("chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
     Metric("target", "Target self-aligned backbone RMSD", "target_backbone_fit_rmsd_angstrom", "Å", False, "Folding"),
     Metric("binder", "Binder self-aligned backbone RMSD", "binder_self_aligned_backbone_rmsd_angstrom", "Å", False, "Folding"),
     Metric("lddt", "Global heavy-atom lDDT", "ost_lddt", "score", True, "Folding"),
-    Metric("chirality", "D-Cα chirality correctness", "chirality_daa_accuracy_pct", "%", True, "Folding"),
+    Metric("placed", "Target-aligned binder backbone RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
     Metric("ilddt", "Interface heavy-atom lDDT", "ost_ilddt", "score", True, "Docking"),
     Metric("dockq", "DockQ", "ost_dockq_ave", "score", True, "Docking"),
-    Metric("placed", "Target-aligned binder backbone RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
     Metric("irmsd", "Interface RMSD", "ost_per_interface_json", "Å", False, "Docking"),
 )
 BY_KEY = {m.key: m for m in METRICS}
@@ -251,7 +251,17 @@ def selected_metric_keys(args: argparse.Namespace, predictions: list[dict]) -> l
     unavailable = [k for k in keys if not any(p[k] is not None for p in predictions)]
     if unavailable:
         raise ValueError(f"No data for metrics {unavailable}; use --metrics to omit unavailable panels")
-    return keys
+    return ordered_panel_keys(keys, BY_KEY)
+
+
+def ordered_panel_keys(keys: list[str], metric_by_key: dict[str, Metric]) -> list[str]:
+    """Put the requested lead metric first in each folding/docking row."""
+    folding = [key for key in keys if metric_by_key[key].group == "Folding"]
+    docking = [key for key in keys if metric_by_key[key].group == "Docking"]
+    folding = [key for key in folding if key in {"chirality", "daa_chirality"}] + [
+        key for key in folding if key not in {"chirality", "daa_chirality"}]
+    docking = [key for key in docking if key == "placed"] + [key for key in docking if key != "placed"]
+    return folding + docking
 
 
 def require_values(points: list[dict], metric: str) -> list[dict]:
@@ -332,8 +342,9 @@ def selection_axis_label(metric: Metric) -> str:
 def panels(keys: list[str], title: str, metric_by_key: dict[str, Metric] | None = None,
            discussion_title: bool = False):
     metric_by_key = metric_by_key or BY_KEY
-    folding = [key for key in keys if metric_by_key[key].group == "Folding"]
-    docking = [key for key in keys if metric_by_key[key].group == "Docking"]
+    ordered = ordered_panel_keys(keys, metric_by_key)
+    folding = [key for key in ordered if metric_by_key[key].group == "Folding"]
+    docking = [key for key in ordered if metric_by_key[key].group == "Docking"]
     cols = max(len(folding), len(docking), 1)
     rows = 2 if len(keys) > 1 else 1
     fig, axes = plt.subplots(rows, cols, figsize=(DOUBLE_WIDTH if rows == 2 else SINGLE_WIDTH,
@@ -720,8 +731,10 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     predictions = load_predictions(args.source, args.seed_regex, args.confidence_csv, args.confidence_root, args.allow_single_method_seed_layout)
     keys = selected_metric_keys(args, predictions)
-    if args.command == "scatter" and not args.metrics:
-        keys.remove("chirality")
+    if args.command == "scatter":
+        keys = [key for key in keys if key != "chirality"]
+        if not keys:
+            parser.error("Scatter uses chirality on the X axis; select at least one other metric for a Y-axis panel")
     describe_points(predictions, keys, args.output_dir)
     describe_skipped(args.source, args.output_dir)
     {"compare": compare, "selection-bars": selection_bars, "scatter": scatter,

@@ -14,23 +14,33 @@ sys.path.insert(0, str(SCRIPTS))
 
 from plot_daa import extract  # noqa: E402
 from plot_metrics import BY_KEY, aggregate, choose, load_predictions, panels, parse_formats, selection_axis_label  # noqa: E402
-from plot_daa_groups import prepare, read_groups  # noqa: E402
+from plot_daa_groups import BY_KEY as GROUP_METRICS, prepare, read_groups  # noqa: E402
 from rcg_style import DOUBLE_WIDTH, display_name, model_color, named_stem  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
 
 class DataRuleTests(unittest.TestCase):
     def test_metric_rows_and_requested_formats(self):
-        fig, axes = panels(["dockq", "target", "placed", "lddt"], "Metric layout")
+        fig, axes = panels(["dockq", "target", "placed", "lddt", "chirality"], "Metric layout")
         try:
+            self.assertEqual(axes["chirality"].get_subplotspec().colspan.start, 0)
             self.assertEqual(axes["target"].get_subplotspec().rowspan.start, 0)
+            self.assertEqual(axes["target"].get_subplotspec().colspan.start, 1)
             self.assertEqual(axes["lddt"].get_subplotspec().rowspan.start, 0)
             self.assertEqual(axes["dockq"].get_subplotspec().rowspan.start, 1)
+            self.assertEqual(axes["dockq"].get_subplotspec().colspan.start, 1)
             self.assertEqual(axes["placed"].get_subplotspec().rowspan.start, 1)
+            self.assertEqual(axes["placed"].get_subplotspec().colspan.start, 0)
             self.assertAlmostEqual(fig.get_size_inches()[0], DOUBLE_WIDTH)
             self.assertEqual(parse_formats("svg,png,pdf"), ("svg", "png", "pdf"))
             self.assertEqual(selection_axis_label(BY_KEY["target"]), "Median Target self-aligned backbone RMSD (Å)")
             self.assertEqual(selection_axis_label(BY_KEY["chirality"]), "Mean D-Cα chirality correctness (%)")
+        finally:
+            plt.close(fig)
+        fig, axes = panels(["dockq", "target", "placed", "daa_chirality"], "DAA-group layout", GROUP_METRICS)
+        try:
+            self.assertEqual(axes["daa_chirality"].get_subplotspec().colspan.start, 0)
+            self.assertEqual(axes["placed"].get_subplotspec().colspan.start, 0)
         finally:
             plt.close(fig)
 

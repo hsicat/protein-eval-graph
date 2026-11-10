@@ -100,7 +100,7 @@ def label_metric(name: str, unit: str) -> str:
 
 
 def panel_title(name: str, higher: bool) -> str:
-    return textwrap.fill(name, width=25, break_long_words=False) + f"\n({'↑' if higher else '↓'} better)"
+    return textwrap.fill(name, width=20, break_long_words=False) + f"\n({'↑' if higher else '↓'} better)"
 
 
 def named_stem(outdir: Path, content: str, figure_id: str | None = None, version: str = "v01") -> Path:
@@ -118,7 +118,7 @@ def letter_panels(axes: list) -> None:
     if len(axes) < 2:
         return
     for i, ax in enumerate(axes):
-        ax.text(-0.09, 1.02, chr(ord("a") + i), transform=ax.transAxes,
+        ax.text(-0.02, 1.02, chr(ord("a") + i), transform=ax.transAxes,
                 fontsize=10, fontweight="bold", ha="right", va="bottom")
 
 
