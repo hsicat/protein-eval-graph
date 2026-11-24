@@ -21,7 +21,7 @@ Ground truth is `#CCCCCC` in general plots. Boltz-2 RCG colors are **reserved**;
 - Use **Arial**. At final size, a single-column figure is 90 mm wide; a double-column or multi-panel figure is 180 mm wide. Do not create at twice the width and shrink the finished figure without scaling text and lines accordingly.
 - Default manuscript figures have left-aligned panel titles (9 pt bold) and lowercase panel letters (10 pt bold). Put the whole-figure title in the manuscript caption. An 11 pt bold, left-aligned whole-figure title is allowed for standalone discussion figures.
 - Axis titles are 9 pt. Tick numbers, category labels, legends, in-panel statistics, structure labels, scale labels, and structure metrics are 8 pt. Colorbar title 9 pt and ticks 8 pt. A short bottom note may be 7.5 pt and at most two lines. Complete caption is 9 pt in the manuscript.
-- Prefer horizontal category labels; wrap long labels instead of reducing font size. Keep equal panel heights within each row and equal panel widths within each column. Adjust figure height and margins before shrinking fonts. The user's two-row rule applies to multi-metric figures: folding metrics first, docking metrics second. A later user preference (2026-11-10) puts D-Cα chirality correctness first in the folding row and Target-aligned binder backbone RMSD first in the docking row whenever those panels are present. Chirality scatter has no chirality-versus-itself panel.
+- Prefer horizontal category labels; wrap long labels instead of reducing font size. Keep equal panel heights within each row and equal panel widths within each column. Adjust figure height and margins before shrinking fonts. The user's two-row rule applies to multi-metric figures: folding metrics first, docking metrics second. A later user preference (2026-11-10) puts D-Cα chirality correctness first in the folding row and L-RMSD first in the docking row whenever those panels are present. Chirality scatter has no chirality-versus-itself panel.
 
 ## Standard metric names and provenance
 
@@ -34,13 +34,22 @@ The arrows `(↑ better)` and `(↓ better)` are display cues outside the metric
 | D-Cα margin pass rate | % | ↑ | Target D sites whose corrected directed angle has margin `q ≥ 15°`; distinct from general correctness. |
 | Target self-aligned backbone RMSD | Å | ↓ | Target fitted independently to reference target. |
 | Binder self-aligned backbone RMSD | Å | ↓ | Binder fitted independently to reference binder. |
-| Target-aligned binder backbone RMSD | Å | ↓ | Fit target only; apply that transformation to binder. |
+| L-RMSD | Å | ↓ | Binder N/CA/C/O RMSD after jointly fitting all annotated target chains on their N/CA/C/O atoms; do not refit binder. |
 | DAA-chain self-aligned backbone RMSD | Å | ↓ | Independently fit each relevant DAA chain to its reference. |
 | DockQ | 0–1 | ↑ | Docking score; record software version, scoring mode, chain mapping and interface scope. |
 | Global heavy-atom lDDT | 0–1 | ↑ | Local distance consistency on specified common heavy atoms. |
 | Interface heavy-atom lDDT | 0–1 | ↑ | Local distance consistency on specified cross-chain heavy-atom pairs. |
 | Selected peptide-bond constraint violation rate | % | ↓ | Violated selected bond constraints divided by assessable constraints. |
 | Selected residue-geometry constraint violation rate | % | ↓ | Violated selected within-residue constraints divided by assessable constraints. |
+
+The user's naming update (2026-11-24) replaces “Target-aligned binder backbone
+RMSD” and “Binder pose RMSD” with **L-RMSD** in figures and tables, including
+axes, panel titles, captions, and success-rate labels. Use **L-RMSD (Å)** and
+**L-RMSD success**. This supersedes the old label in the preserved Notion source
+snapshot; no Notion refresh is required. Keep the `placed` key and
+`target_aligned_binder_backbone_rmsd_angstrom` source field unchanged. Define
+the target fit and binder measurement in captions. Keep self-aligned RMSDs,
+CA-only diagnostics, and OpenStructure per-interface `lrmsd` distinct.
 
 The present graph scripts consume evaluation scores; they do **not** recompute them. Before publication, verify the score source implements the definition. The Notion page specifies N, Cα, C, O for backbone RMSD, common atoms, and proper rigid fits without mirroring. For the four-group analysis it specifies mean across included interfaces for system DockQ, median for interface-level target/binder RMSDs, and mean of independently fitted DAA-chain RMSDs. Document any different aggregation explicitly. Keep all-interface and DAA-related interface scores separate. Its current lDDT implementation is distance-only, pair-weighted on common heavy-atom pairs of different residues within about 15 Å reference distance, with 0.5/1/2/4 Å thresholds; interface lDDT uses cross-chain pairs. Do not claim these implementation details for an unverified CSV. These lDDT scores omit chemical symmetry and stereochemical penalties.
 

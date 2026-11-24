@@ -14,12 +14,12 @@ For each input and metric, choose its best seed independently: minimize RMSDs; m
 
 ## Folding/docking comparison
 
-Use `plot_metrics.py compare --input-id ID` with one or more model sources. Eight panels are available: the four folding metrics, three requested docking metrics, and Interface RMSD as the eighth panel from the earlier comparison figures. Multi-metric figures put D-Cα chirality correctness first in the folding row and Target-aligned binder backbone RMSD first in the docking row, even when `--metrics` lists them later. By default each model must contribute exactly one prediction for that ID. If multiple seeds exist, explicitly choose `--selection top1` or `--selection oracle`; the latter selects a different seed per panel. If iRMSD is unavailable, omit it using `--metrics` and report that it was unavailable.
+Use `plot_metrics.py compare --input-id ID` with one or more model sources. Eight panels are available: the four folding metrics, three requested docking metrics, and Interface RMSD as the eighth panel from the earlier comparison figures. Multi-metric figures put D-Cα chirality correctness first in the folding row and L-RMSD first in the docking row, even when `--metrics` lists them later. By default each model must contribute exactly one prediction for that ID. If multiple seeds exist, explicitly choose `--selection top1` or `--selection oracle`; the latter selects a different seed per panel. If iRMSD is unavailable, omit it using `--metrics` and report that it was unavailable.
 
 ## Seed-selection bars
 
 Use `selection-bars` for top-1 versus metric-specific oracle. Top-1 requires a `confidence_score` column, `--confidence-csv`, or adjacent Boltz confidence JSON files via `--confidence-root`. `--scope common` retains IDs with both methods; `--scope all` uses available IDs per method and is not a paired comparison. RMSDs are medians across selected inputs; lDDT, interface lDDT, DockQ, and D-Cα correctness are system-equal arithmetic means. Label each panel's Y axis with this aggregation. `--error-bars` shows sample SD of selected system-level values, **not** uncertainty of the aggregate. `--oracle-target chirality` selects the same D-Cα-oracle structure across panels; otherwise each metric panel has its own selected structure.
-Oracle ties prefer higher D-Cα correctness, then lower target-aligned binder backbone RMSD, then the lowest seed ID.
+Oracle ties prefer higher D-Cα correctness, then lower L-RMSD, then the lowest seed ID. The display rename retains the `placed` key and its existing values and selection rules.
 
 ## Chirality-versus-structure scatter
 

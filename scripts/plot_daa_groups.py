@@ -9,7 +9,7 @@ import statistics as stats
 from collections import defaultdict
 from pathlib import Path
 
-from plot_metrics import BY_KEY as BASE_METRICS, Metric, load_predictions, method_color, ordered_panel_keys, panels, parse_formats, save, setup_style, write_csv
+from plot_metrics import BY_KEY as BASE_METRICS, L_RMSD_CAPTION, Metric, load_predictions, method_color, ordered_panel_keys, panels, parse_formats, save, setup_style, write_csv
 from matplotlib.patches import Patch
 from rcg_style import INK, display_name, model_marker, named_stem, ordered_models, panel_title
 
@@ -239,7 +239,8 @@ def main() -> None:
         "Boxes show median and interquartile range; whiskers reach the most extreme observations within 1.5×IQR; all system values are shown. "
         "D-Cα correctness uses correct/target D-site counts, including unassessable target sites in the denominator. "
         f"Excluded systems: {len(excluded)} (see excluded_inputs.csv). "
-        "[Verify score provenance, chain mapping, lDDT implementation, and all other evaluation restrictions.]\n"
+        + (L_RMSD_CAPTION if "placed" in keys else "")
+        + "[Verify score provenance, chain mapping, lDDT implementation, and all other evaluation restrictions.]\n"
     )
     (args.output_dir / "caption_draft.md").write_text(caption, encoding="utf-8")
     print(f"Plotted {len(set(row['sample_id'] for row in input_rows))} common inputs; excluded {len(excluded)}. Figures: {', '.join(args.formats)}")

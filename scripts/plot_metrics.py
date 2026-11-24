@@ -32,6 +32,10 @@ from rcg_style import (CONDITION_COLORS, DOUBLE_WIDTH, INK, PAIR_LINE, SINGLE_WI
 BLUE = CONDITION_COLORS["baseline"]
 ORANGE = CONDITION_COLORS["steering"]
 RMSD_FIELDS = {"target", "binder", "placed", "irmsd"}
+L_RMSD_CAPTION = (
+    "L-RMSD denotes binder backbone (N, Cα, C, O) RMSD after jointly fitting all "
+    "annotated target chains on their backbone atoms, without refitting the binder. "
+)
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ METRICS = (
     Metric("target", "Target self-aligned backbone RMSD", "target_backbone_fit_rmsd_angstrom", "Å", False, "Folding"),
     Metric("binder", "Binder self-aligned backbone RMSD", "binder_self_aligned_backbone_rmsd_angstrom", "Å", False, "Folding"),
     Metric("lddt", "Global heavy-atom lDDT", "ost_lddt", "score", True, "Folding"),
-    Metric("placed", "Target-aligned binder backbone RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
+    Metric("placed", "L-RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
     Metric("ilddt", "Interface heavy-atom lDDT", "ost_ilddt", "score", True, "Docking"),
     Metric("dockq", "DockQ", "ost_dockq_ave", "score", True, "Docking"),
     Metric("irmsd", "Interface RMSD", "ost_per_interface_json", "Å", False, "Docking"),
@@ -774,7 +778,8 @@ def main():
         f"Observation unit: {manifest['observation_unit']}. "
         f"Input IDs present in every model before metric-specific exclusions: {matched}. "
         f"Selection: {selection}.{top1_note} {oracle_note}.\n\n"
-        "[Verify source metric definitions, N/Cα/C/O alignment atoms, chain mappings, "
+        + (L_RMSD_CAPTION if "placed" in keys else "")
+        + "[Verify source metric definitions, N/Cα/C/O alignment atoms, chain mappings, "
         "DockQ mode/interface scope, and lDDT implementation before stating them.] "
         "D-Cα correctness uses correct/target D-site counts; unassessable target sites remain in the denominator. "
         "Missing metrics are NA in normalized_predictions.csv with reasons in missing_values.csv; "
