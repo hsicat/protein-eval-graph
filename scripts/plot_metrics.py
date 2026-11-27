@@ -58,12 +58,13 @@ METRICS = (
     Metric("binder", "Binder self-aligned backbone RMSD", "binder_self_aligned_backbone_rmsd_angstrom", "Å", False, "Folding"),
     Metric("lddt", "Global heavy-atom lDDT", "ost_lddt", "score", True, "Folding"),
     Metric("placed", "L-RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
-    Metric("ilddt", "iLDDT", "ost_ilddt", "score", True, "Docking"),
-    Metric("dockq", "DockQ", "ost_dockq_ave", "score", True, "Docking"),
-    Metric("irmsd", "Interface RMSD", "ost_per_interface_json", "Å", False, "Docking"),
+    Metric("ilddt", "iLDDT", "target_binder_ilddt_macro", "score", True, "Docking"),
+    Metric("dockq", "DockQ", "target_binder_dockq_mean", "score", True, "Docking"),
+    Metric("irmsd", "Interface RMSD", "target_binder_dockq_per_interface_json", "Å", False, "Docking"),
 )
 BY_KEY = {m.key: m for m in METRICS}
-PREDICTION_FIELDS = {m.column for m in METRICS if m.key not in {"binder", "placed", "irmsd"}}
+DAA_COUNTS = ("chirality_daa_correct_count", "chirality_daa_eligible_count",
+              "chirality_daa_skipped_count", "chirality_daa_assessable_count")
 
 
 def metric_label_for_plot(args: argparse.Namespace, key: str) -> str:
@@ -148,7 +149,8 @@ def read_confidence(path: Path | None) -> dict[str, float]:
 
 
 def load_predictions(source_specs: list[str], seed_regex: str | None, confidence_csv: Path | None,
-                     confidence_root: Path | None = None, allow_single_method_seed_layout: bool = False) -> list[dict]:
+                     confidence_root: Path | None = None, allow_single_method_seed_layout: bool = False,
+                     stereochecks: str = "on") -> list[dict]:
     confidence = read_confidence(confidence_csv)
     seen_models = set()
     predictions = []
@@ -197,39 +199,40 @@ def load_predictions(source_specs: list[str], seed_regex: str | None, confidence
                 "unavailable_metrics_json": first.get("unavailable_metrics_json", ""),
             }
             for m in METRICS:
+                if m.key == "chirality":
+                    continue
+                column = m.column + "_no_stereochecks" if (
+                    stereochecks == "off" and m.key in {"lddt", "ilddt"}
+                ) else m.column
                 if m.key in {"binder", "placed"}:
-                    vals = [number(r.get(m.column)) for r in group]
+                    vals = [number(r.get(column)) for r in group]
                     finite = [v for v in vals if v is not None]
-                    item[m.key] = stats.median(finite) if finite else None
+                    item[m.key] = stats.mean(finite) if finite else None
                 elif m.key == "irmsd":
-                    raw = first.get(m.column)
+                    raw = first.get(column)
                     interfaces = (json.loads(raw) if raw else None) or []
                     if not isinstance(interfaces, list):
                         raise ValueError(f"Invalid {m.column} for {pred_path}: expected an interface list")
                     vals = [number(i.get("irmsd")) for i in interfaces]
                     finite = [v for v in vals if v is not None]
-                    item[m.key] = stats.median(finite) if finite else None
+                    item[m.key] = stats.mean(finite) if finite else None
                 else:
-                    vals = {number(r.get(m.column)) for r in group}
+                    vals = {number(r.get(column)) for r in group}
                     if len(vals) != 1:
-                        raise ValueError(f"Prediction-level {m.column} differs across binder rows: {pred_path}")
+                        raise ValueError(f"Prediction-level {column} differs across binder rows: {pred_path}")
                     item[m.key] = vals.pop()
-            for col in ("chirality_all_correct_count", "chirality_all_eligible_count", "chirality_all_skipped_count"):
+            for col in (*DAA_COUNTS, "chirality_all_correct_count", "chirality_all_eligible_count",
+                        "chirality_all_skipped_count", "chirality_all_assessable_count"):
                 vals = {number(r.get(col)) for r in group}
                 if len(vals) != 1:
                     raise ValueError(f"Prediction-level {col} differs across binder rows: {pred_path}")
                 item[col] = vals.pop()
-            for col in ("chirality_daa_accuracy_pct", "chirality_daa_correct_count", "chirality_daa_eligible_count", "chirality_daa_skipped_count"):
-                vals = {number(r.get(col)) for r in group}
-                if len(vals) != 1:
-                    raise ValueError(f"Prediction-level {col} differs across binder rows: {pred_path}")
-                item[col] = vals.pop()
-            # RCG manuscript denominator is all target D sites; unassessable sites
-            # remain in that denominator and are never called verified inversions.
-            eligible = item["chirality_daa_eligible_count"]
-            correct = item["chirality_daa_correct_count"]
-            item["chirality"] = 100 * correct / eligible if eligible and correct is not None else None
-            item["daa_chirality"] = item["chirality"]
+            if item["chirality_daa_assessable_count"] is None:
+                eligible = item["chirality_daa_eligible_count"]
+                skipped = item["chirality_daa_skipped_count"]
+                if eligible is not None and skipped is not None:
+                    item["chirality_daa_assessable_count"] = eligible - skipped
+            item["chirality"] = item["daa_chirality"] = pooled_daa_accuracy([item])
             score = confidence.get(pred_path, number(first.get("confidence_score")))
             if score is None and confidence_root is not None:
                 structure = confidence_root / pred_path
@@ -339,7 +342,7 @@ def selection_axis_label(metric: Metric) -> str:
     if metric.key in RMSD_FIELDS:
         return f"Median {label_metric(metric.label, metric.unit)}"
     if metric.key == "chirality":
-        return "Mean D-Cα chirality correctness (%)"
+        return "Pooled D-Cα chirality correctness (%)"
     return f"Mean {label_metric(metric.label, metric.unit)}"
 
 
@@ -367,7 +370,7 @@ def panels(keys: list[str], title: str, metric_by_key: dict[str, Metric] | None 
 
 
 def describe_points(predictions: list[dict], keys: list[str], outdir: Path) -> None:
-    rows = [{k: p.get(k) for k in ("model", "sample_id", "seed", "prediction_path", "status", "binder_groups", "confidence_score", "chirality_daa_correct_count", "chirality_daa_eligible_count", "chirality_daa_skipped_count", "warnings", "unavailable_metrics_json", *keys)} for p in predictions]
+    rows = [{k: p.get(k) for k in ("model", "sample_id", "seed", "prediction_path", "status", "binder_groups", "confidence_score", *DAA_COUNTS, "warnings", "unavailable_metrics_json", *keys)} for p in predictions]
     write_csv(outdir / "normalized_predictions.csv", rows)
     missing = [{"model": p["model"], "sample_id": p["sample_id"], "seed": p["seed"],
                 "prediction_path": p["prediction_path"], "metric": key,
@@ -436,6 +439,15 @@ def compare(args, predictions, keys):
     write_csv(args.output_dir / "comparison_plot_data.csv", data)
 
 
+def pooled_daa_accuracy(points: list[dict]) -> float | None:
+    counts = [(p.get("chirality_daa_correct_count"), p.get("chirality_daa_assessable_count"))
+              for p in points]
+    valid = [(passed, assessable) for passed, assessable in counts
+             if passed is not None and assessable and 0 <= passed <= assessable]
+    total = sum(assessable for _, assessable in valid)
+    return 100 * sum(passed for passed, _ in valid) / total if total else None
+
+
 def aggregate(chosen: list[dict], metric: str) -> tuple[float, float | None, int]:
     vals = [p[metric] for p in chosen if p[metric] is not None]
     if not vals:
@@ -443,7 +455,9 @@ def aggregate(chosen: list[dict], metric: str) -> tuple[float, float | None, int
     if metric in RMSD_FIELDS:
         center = stats.median(vals)
     elif metric == "chirality":
-        center = stats.mean(vals)  # systems, not D sites, receive equal weight
+        center = pooled_daa_accuracy(chosen)
+        if center is None:
+            raise ValueError("D-Cα chirality requires assessable residue counts")
     else:
         center = stats.mean(vals)
     return center, stats.stdev(vals) if len(vals) > 1 else None, len(vals)
@@ -488,7 +502,10 @@ def selection_bars(args, predictions, keys):
                 centers.append(center)
                 errors.append(sd or 0)
                 colors.append(method_color(model, set(args.steering), models))
-                records.append({"metric": key, "model": model, "selection": mode, "scope": args.scope, "n_inputs": n, "value": center, "sample_sd": sd, "aggregation": "median" if key in RMSD_FIELDS else "system-equal mean"})
+                aggregation = {
+                    **dict.fromkeys(RMSD_FIELDS, "median"), "chirality": "pooled assessable D sites"
+                }.get(key, "system-equal mean")
+                records.append({"metric": key, "model": model, "selection": mode, "scope": args.scope, "n_inputs": n, "value": center, "sample_sd": sd, "aggregation": aggregation})
         if not centers:
             ax.set_visible(False)
             continue
@@ -711,6 +728,8 @@ def main():
         p.add_argument("--version", default="v01", help="Final manuscript figure version (default: v01)")
         p.add_argument("--discussion-title", action="store_true", help="Add an 11 pt whole-figure title for standalone discussion figures")
         p.add_argument("--metrics", help=f"Comma-separated keys; default all: {','.join(BY_KEY)}")
+        p.add_argument("--stereochecks", choices=("on", "off"), default="on",
+                       help="Choose the saved OpenStructure lDDT and iLDDT versions")
         p.add_argument("--lddt-label", help="Source-accurate global lDDT label for scatter titles and axes")
         p.add_argument("--ilddt-label", help="Source-accurate interface lDDT label for scatter titles and axes")
         p.add_argument("--steering", action="append", default=[], help="Model label to color orange; repeat as needed")
@@ -733,7 +752,9 @@ def main():
     args = parser.parse_args()
     setup_style()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    predictions = load_predictions(args.source, args.seed_regex, args.confidence_csv, args.confidence_root, args.allow_single_method_seed_layout)
+    predictions = load_predictions(args.source, args.seed_regex, args.confidence_csv,
+                                   args.confidence_root, args.allow_single_method_seed_layout,
+                                   args.stereochecks)
     keys = selected_metric_keys(args, predictions)
     if args.command == "scatter":
         keys = [key for key in keys if key != "chirality"]
@@ -781,7 +802,8 @@ def main():
         + (L_RMSD_CAPTION if "placed" in keys else "")
         + "[Verify source metric definitions, N/Cα/C/O alignment atoms, chain mappings, "
         "DockQ mode/interface scope, and lDDT implementation before stating them.] "
-        "D-Cα correctness uses correct/target D-site counts; unassessable target sites remain in the denominator. "
+        f"OpenStructure lDDT and iLDDT use stereochemistry checks {args.stereochecks}. "
+        "D-Cα correctness uses passed/assessable D sites at the evaluation cutoff. "
         "Missing metrics are NA in normalized_predictions.csv with reasons in missing_values.csv; "
         "skipped evaluations are in skipped_predictions.csv. "
         + ("Error bars show sample SD across selected system-level values. " if getattr(args, "error_bars", False) else "")

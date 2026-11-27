@@ -34,7 +34,7 @@ class DataRuleTests(unittest.TestCase):
             self.assertAlmostEqual(fig.get_size_inches()[0], DOUBLE_WIDTH)
             self.assertEqual(parse_formats("svg,png,pdf"), ("svg", "png", "pdf"))
             self.assertEqual(selection_axis_label(BY_KEY["target"]), "Median Target self-aligned backbone RMSD (Å)")
-            self.assertEqual(selection_axis_label(BY_KEY["chirality"]), "Mean D-Cα chirality correctness (%)")
+            self.assertEqual(selection_axis_label(BY_KEY["chirality"]), "Pooled D-Cα chirality correctness (%)")
         finally:
             plt.close(fig)
         fig, axes = panels(["dockq", "target", "placed", "daa_chirality"], "DAA-group layout", GROUP_METRICS)
@@ -54,7 +54,7 @@ class DataRuleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             model_color("Boltz2_RCG", ["Boltz2_RCG"])
 
-    def test_d_ca_correctness_counts_missing_target_sites_and_systems_equally(self):
+    def test_d_ca_correctness_pools_assessable_sites(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "batch_summary.csv"
             rows = [
@@ -70,8 +70,8 @@ class DataRuleTests(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(rows)
             points = load_predictions([f"Boltz1={path}"], None, None)
-            self.assertEqual([point["chirality"] for point in points], [50, 0])
-            self.assertEqual(aggregate(points, "chirality")[0], 25)
+            self.assertEqual([point["chirality"] for point in points], [100, 0])
+            self.assertAlmostEqual(aggregate(points, "chirality")[0], 100 / 9)
 
     def test_daa_groups_oracle_and_legacy_chain_csv(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,13 +100,19 @@ class DataRuleTests(unittest.TestCase):
                 "sample_id", "prediction_path", "status", "binder_self_aligned_backbone_rmsd_angstrom",
                 "target_aligned_binder_backbone_rmsd_angstrom", "target_backbone_fit_rmsd_angstrom",
                 "ost_lddt", "ost_ilddt", "ost_dockq_ave", "ost_per_interface_json",
+                "ost_lddt_no_stereochecks", "target_binder_ilddt_macro_no_stereochecks",
+                "target_binder_ilddt_macro", "target_binder_dockq_mean",
+                "target_binder_dockq_per_interface_json",
                 "chirality_all_accuracy_pct", "chirality_all_correct_count",
                 "chirality_all_eligible_count", "chirality_all_skipped_count", "confidence_score",
                 "chirality_daa_correct_count", "chirality_daa_eligible_count", "chirality_daa_skipped_count",
             ]
             common = {"sample_id": "X001", "status": "SUCCESS", "target_backbone_fit_rmsd_angstrom": 1,
                       "ost_ilddt": 0.5, "ost_dockq_ave": 0.6,
-                      "ost_per_interface_json": json.dumps([{"irmsd": 2}, {"irmsd": 4}]),
+                      "ost_per_interface_json": json.dumps([{"irmsd": 20}]),
+                      "ost_lddt_no_stereochecks": 0.95, "target_binder_ilddt_macro_no_stereochecks": 0.85,
+                      "target_binder_ilddt_macro": 0.7, "target_binder_dockq_mean": 0.8,
+                      "target_binder_dockq_per_interface_json": json.dumps([{"irmsd": 1}, {"irmsd": 2}, {"irmsd": 6}]),
                       "chirality_all_eligible_count": 10, "chirality_all_skipped_count": 0,
                       "chirality_daa_eligible_count": 2, "chirality_daa_skipped_count": 0}
             rows = [
@@ -115,6 +121,9 @@ class DataRuleTests(unittest.TestCase):
                  "chirality_all_accuracy_pct": 50, "chirality_all_correct_count": 5, "chirality_daa_correct_count": 1, "confidence_score": .9},
                 {**common, "prediction_path": "predicted/boltz1/00/X001/model.cif", "binder_self_aligned_backbone_rmsd_angstrom": 5,
                  "target_aligned_binder_backbone_rmsd_angstrom": 7, "ost_lddt": .8,
+                 "chirality_all_accuracy_pct": 50, "chirality_all_correct_count": 5, "chirality_daa_correct_count": 1, "confidence_score": .9},
+                {**common, "prediction_path": "predicted/boltz1/00/X001/model.cif", "binder_self_aligned_backbone_rmsd_angstrom": 2,
+                 "target_aligned_binder_backbone_rmsd_angstrom": 14, "ost_lddt": .8,
                  "chirality_all_accuracy_pct": 50, "chirality_all_correct_count": 5, "chirality_daa_correct_count": 1, "confidence_score": .9},
                 {**common, "prediction_path": "predicted/boltz1/01/X001/model.cif", "binder_self_aligned_backbone_rmsd_angstrom": 4,
                  "target_aligned_binder_backbone_rmsd_angstrom": 4, "ost_lddt": .9,
@@ -126,9 +135,15 @@ class DataRuleTests(unittest.TestCase):
                 writer.writerows(rows)
             points = load_predictions([f"Boltz1={path}::boltz1"], None, None)
             self.assertEqual(len(points), 2)
-            self.assertEqual(points[0]["binder"], 3)
-            self.assertEqual(points[0]["placed"], 5)
+            self.assertAlmostEqual(points[0]["binder"], 8 / 3)
+            self.assertEqual(points[0]["placed"], 8)
             self.assertEqual(points[0]["irmsd"], 3)
+            self.assertEqual(points[0]["ilddt"], 0.7)
+            self.assertEqual(points[0]["dockq"], 0.8)
+            unchecked = load_predictions([f"Boltz1={path}::boltz1"], None, None, stereochecks="off")
+            self.assertEqual(unchecked[0]["lddt"], 0.95)
+            self.assertEqual(unchecked[0]["ilddt"], 0.85)
+            self.assertEqual(unchecked[0]["dockq"], 0.8)
             self.assertEqual(points[0]["chirality"], 50)
             self.assertEqual(choose(points, "top1", "lddt")["seed"], "00")
             self.assertEqual(choose(points, "oracle", "lddt")["seed"], "01")

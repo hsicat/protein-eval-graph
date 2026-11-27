@@ -9,7 +9,10 @@ import statistics as stats
 from collections import defaultdict
 from pathlib import Path
 
-from plot_metrics import BY_KEY as BASE_METRICS, L_RMSD_CAPTION, Metric, load_predictions, method_color, ordered_panel_keys, panels, parse_formats, save, setup_style, write_csv
+from plot_metrics import (
+    BY_KEY as BASE_METRICS, L_RMSD_CAPTION, Metric, load_predictions, method_color,
+    ordered_panel_keys, panels, parse_formats, pooled_daa_accuracy, save, setup_style, write_csv,
+)
 from matplotlib.patches import Patch
 from rcg_style import INK, display_name, model_marker, named_stem, ordered_models, panel_title
 
@@ -104,20 +107,29 @@ def prepare(predictions: list[dict], groups: dict[str, dict], models: list[str],
                                       "seed": point["seed"], "metric": key, "value": point[key],
                                       "prediction_path": point["prediction_path"]})
                 best = select_oracle(points, key)
+                across_seeds = (pooled_daa_accuracy(points) if key == "daa_chirality"
+                                else stats.mean(p[key] for p in points) if metric.higher
+                                else stats.median(p[key] for p in points))
                 input_rows.append({"sample_id": sample, **groups[sample], "model": model, "metric": key,
                                    "oracle_seed": best["seed"], "oracle_value": best[key],
                                    "oracle_prediction_path": best["prediction_path"], "n_seeds": len(points),
-                                   "across_seed_value": stats.mean(p[key] for p in points) if metric.higher else stats.median(p[key] for p in points)})
+                                   "across_seed_value": across_seeds,
+                                   "chirality_daa_correct_count": best.get("chirality_daa_correct_count") if key == "daa_chirality" else None,
+                                   "chirality_daa_assessable_count": best.get("chirality_daa_assessable_count") if key == "daa_chirality" else None})
     group_rows = []
     for model in models:
         for key in keys:
             metric = BY_KEY[key]
             for group in GROUP_ORDER:
-                values = [row["oracle_value"] for row in input_rows if row["model"] == model and row["metric"] == key and row["group"] == group]
+                selected = [row for row in input_rows if row["model"] == model and row["metric"] == key and row["group"] == group]
+                values = [row["oracle_value"] for row in selected]
                 if values:
+                    statistic, center = (("mean", stats.mean(values)) if metric.higher
+                                         else ("median", stats.median(values)))
+                    if key == "daa_chirality":
+                        statistic, center = "pooled assessable D sites", pooled_daa_accuracy(selected)
                     group_rows.append({"model": model, "metric": key, "group": group, "n_inputs": len(values),
-                                       "statistic": "mean" if metric.higher else "median",
-                                       "group_oracle_value": stats.mean(values) if metric.higher else stats.median(values)})
+                                       "statistic": statistic, "group_oracle_value": center})
     return excluded, seed_rows, input_rows, group_rows
 
 
@@ -194,6 +206,7 @@ def main() -> None:
     parser.add_argument("--source", action="append", required=True, help="MODEL=CSV or MODEL=CSV::PATH_METHOD; first source is non-steering, second is steering")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--metrics", help=f"Comma-separated subset of {','.join(BY_KEY)} (default all)")
+    parser.add_argument("--stereochecks", choices=("on", "off"), default="on")
     parser.add_argument("--seed-regex", help="Regex with a capture group for seed ID")
     parser.add_argument("--expected-seeds", type=int, help="Require this many evaluated seeds per input and model")
     parser.add_argument("--formats", type=parse_formats, default=("svg",), help="Comma-separated svg,png,pdf (default: svg)")
@@ -211,7 +224,7 @@ def main() -> None:
     keys = ordered_panel_keys(keys, BY_KEY)
     setup_style()
     groups = read_groups(args.chain_details)
-    predictions = load_predictions(args.source, args.seed_regex, None)
+    predictions = load_predictions(args.source, args.seed_regex, None, stereochecks=args.stereochecks)
     models = ordered_models(list(dict.fromkeys(point["model"] for point in predictions)))
     excluded, seed_rows, input_rows, group_rows = prepare(predictions, groups, models, keys, args.expected_seeds)
     present_groups = [group for group in GROUP_ORDER if any(row["group"] == group for row in input_rows)]
@@ -235,9 +248,11 @@ def main() -> None:
         + ", ".join(f"{group} n={counts[group]}" for group in present_groups) + ". "
         f"Each dot is one system; predictions have {args.expected_seeds or 'variable'} evaluated seeds per system and model. "
         "The best seed is selected independently for each metric and system; these panels do not form a joint structure profile. "
-        "Bars show system-level medians for RMSD and system-equal means for lDDT, DockQ and D-Cα correctness. "
+        "Bars show system-level medians for RMSD, system-equal means for lDDT and DockQ, "
+        "and residue-pooled D-Cα correctness. "
         "Boxes show median and interquartile range; whiskers reach the most extreme observations within 1.5×IQR; all system values are shown. "
-        "D-Cα correctness uses correct/target D-site counts, including unassessable target sites in the denominator. "
+        "D-Cα correctness uses passed/assessable D sites at the evaluation cutoff. "
+        f"OpenStructure lDDT and iLDDT use stereochemistry checks {args.stereochecks}. "
         f"Excluded systems: {len(excluded)} (see excluded_inputs.csv). "
         + (L_RMSD_CAPTION if "placed" in keys else "")
         + "[Verify score provenance, chain mapping, lDDT implementation, and all other evaluation restrictions.]\n"

@@ -29,7 +29,7 @@ The arrows `(↑ better)` and `(↓ better)` are display cues outside the metric
 
 | Metric name | Unit | Direction | Meaning |
 | --- | --- | --- | --- |
-| D-Cα chirality correctness | % | ↑ | Correct target D-Cα sites divided by prespecified target D-Cα sites. |
+| D-Cα chirality correctness | % | ↑ | For batch-based figures, D sites passing the inclusive 15° cutoff divided by assessable D sites. |
 | Systems with all D-Cα sites correct | % | ↑ | Systems with every target D-Cα site correct divided by included systems. |
 | D-Cα margin pass rate | % | ↑ | Target D sites whose corrected directed angle has margin `q ≥ 15°`; distinct from general correctness. |
 | Target self-aligned backbone RMSD | Å | ↓ | Target fitted independently to reference target. |
@@ -42,7 +42,7 @@ The arrows `(↑ better)` and `(↓ better)` are display cues outside the metric
 | Selected peptide-bond constraint violation rate | % | ↓ | Violated selected bond constraints divided by assessable constraints. |
 | Selected residue-geometry constraint violation rate | % | ↓ | Violated selected within-residue constraints divided by assessable constraints. |
 
-For saved OpenStructure `ost_ilddt` plots, display the metric as **iLDDT** by default and define its target–binder interface scope and scoring provenance in the caption. This display name does not identify it with the separately defined Interface heavy-atom lDDT metric above.
+For batch OpenStructure plots, display `target_binder_ilddt_macro` as **iLDDT**. Define its target–binder scope and document which stereochemistry check mode was used. This display name does not identify it with the separately defined Interface heavy-atom lDDT metric above.
 
 The user's naming update (2026-11-24) replaces “Target-aligned binder backbone
 RMSD” and “Binder pose RMSD” with **L-RMSD** in figures and tables, including
@@ -55,7 +55,11 @@ CA-only diagnostics, and OpenStructure per-interface `lrmsd` distinct.
 
 The present graph scripts consume evaluation scores; they do **not** recompute them. Before publication, verify the score source implements the definition. The Notion page specifies N, Cα, C, O for backbone RMSD, common atoms, and proper rigid fits without mirroring. For the four-group analysis it specifies mean across included interfaces for system DockQ, median for interface-level target/binder RMSDs, and mean of independently fitted DAA-chain RMSDs. Document any different aggregation explicitly. Keep all-interface and DAA-related interface scores separate. Its current lDDT implementation is distance-only, pair-weighted on common heavy-atom pairs of different residues within about 15 Å reference distance, with 0.5/1/2/4 Å thresholds; interface lDDT uses cross-chain pairs. Do not claim these implementation details for an unverified CSV. These lDDT scores omit chemical symmetry and stereochemical penalties.
 
-For chirality, the page defines corrected directed angle `q > 0°` as correct; `q = 0°` is not correct. The `q ≥ 15°` margin is a separate metric. Exclude sites without the specified chirality center. Keep target, assessable, correct and unassessable site counts. Missing target sites stay in the correctness denominator and must not be called confirmed inversions. The graph loader uses `chirality_daa_correct_count / chirality_daa_eligible_count`, not the evaluation CSV's assessable-site percentage or pooled D/L percentage. Check that input evaluation's DAA site set matches the intended target set.
+The preserved Notion page also describes a zero-margin chirality metric with
+the criterion `q > 0°` and all prespecified D sites as its denominator. For
+batch-based figures, retain the counts of eligible, assessable, passed, and
+unassessable sites. Check that the input evaluation's DAA site set matches the
+intended target set.
 
 ## Statistical display
 
@@ -64,7 +68,7 @@ For chirality, the page defines corrected directed angle `q > 0°` as correct; `
 - Record missing results as `NA` with reasons. Compare matched available systems for paired analyses; never replace missing scores by zero. A boxplot shows median, 25th–75th percentiles, whiskers to the most extreme points within 1.5×IQR, and all raw points. Hiding duplicate outlier symbols is permitted only if raw points remain.
 - Label error bars as SD, SEM, or 95% CI. Bootstrap system-level comparisons at the system level and retain pairing. Define change as new condition minus control. A percentage difference uses **percentage points**.
 - Default display precision: correctness and rates 1 decimal, RMSD 2 decimals, DockQ/lDDT 3 decimals, counts integer. Compute at full precision; increase displayed precision consistently within a panel if a real effect would otherwise disappear.
-- Across-system D-Cα correctness is the **system-equal mean**. If pooling sites instead, label it `Pooled-site D-Cα chirality correctness (%)`.
+- For batch-aligned figures, pool passed and assessable D-site counts across selected predictions. Label these bars `Pooled D-Cα chirality correctness (%)`.
 
 ## Axes, marks, and structure figures
 
