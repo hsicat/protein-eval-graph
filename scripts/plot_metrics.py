@@ -58,7 +58,7 @@ METRICS = (
     Metric("binder", "Binder self-aligned backbone RMSD", "binder_self_aligned_backbone_rmsd_angstrom", "Å", False, "Folding"),
     Metric("lddt", "Global heavy-atom lDDT", "ost_lddt", "score", True, "Folding"),
     Metric("placed", "L-RMSD", "target_aligned_binder_backbone_rmsd_angstrom", "Å", False, "Docking"),
-    Metric("ilddt", "Interface heavy-atom lDDT", "ost_ilddt", "score", True, "Docking"),
+    Metric("ilddt", "iLDDT", "ost_ilddt", "score", True, "Docking"),
     Metric("dockq", "DockQ", "ost_dockq_ave", "score", True, "Docking"),
     Metric("irmsd", "Interface RMSD", "ost_per_interface_json", "Å", False, "Docking"),
 )

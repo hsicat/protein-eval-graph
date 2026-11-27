@@ -42,6 +42,8 @@ The arrows `(↑ better)` and `(↓ better)` are display cues outside the metric
 | Selected peptide-bond constraint violation rate | % | ↓ | Violated selected bond constraints divided by assessable constraints. |
 | Selected residue-geometry constraint violation rate | % | ↓ | Violated selected within-residue constraints divided by assessable constraints. |
 
+For saved OpenStructure `ost_ilddt` plots, display the metric as **iLDDT** by default and define its target–binder interface scope and scoring provenance in the caption. This display name does not identify it with the separately defined Interface heavy-atom lDDT metric above.
+
 The user's naming update (2026-11-24) replaces “Target-aligned binder backbone
 RMSD” and “Binder pose RMSD” with **L-RMSD** in figures and tables, including
 axes, panel titles, captions, and success-rate labels. Use **L-RMSD (Å)** and
